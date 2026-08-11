@@ -8,8 +8,18 @@ chat DB (Cloud SQL), unreachable outside the VPC; LangSmith (a public API, with 
 holds the runs with conversation_id + authoritative tokens/latency + intent/frustration
 signals and can reconstruct conversations for analysis now.
 
+## Update (2026-08-11): chatdb is the canonical source; LangSmith reconstruction was unreliable
+A live check showed the LangSmith run→message reconstruction produced **garbage** (duplicated
+text + internal prompt templates), so classification collapsed to `failed_to_resolve`. The
+real conversations live in the **chat DB** schema `jai_agentos_schema_uit` (db `jai_agentos_uit`):
+`conversations` / `messages` (real content+role+sequence) / `feedback` / `token_usage`.
+`app/chatdb.py` reads them **READ-ONLY (SELECT)** and is now the canonical source
+(`SOURCE=chatdb`). LangSmith is retained only for token/latency enrichment (ADR-0003), not
+transcript reconstruction. Verified: real conversations classify correctly & variedly
+(resolved / failed_to_resolve / out_of_scope) via Vertex.
+
 ## Decision
-- A pluggable source selected by `SOURCE` (`fixtures` default, `langsmith`).
+- A pluggable source selected by `SOURCE`: **`chatdb`** (real, canonical) | `fixtures` | `langsmith`.
 - `app/sources.py::load_from_langsmith` resolves the project session, queries
   `/api/v1/runs/query`, and groups runs by `conversation_id` (metadata) into `Conversation`
   objects. Field mapping (inputs/outputs → messages) is **best-effort and isolated** in

@@ -14,16 +14,20 @@ from app.domain.analyze import analyze
 from app.fixtures import CONVERSATIONS
 from app.store_sql import SqlResultStore
 
-PG_URL = os.getenv("TEST_DATABASE_URL", "postgresql+psycopg://jai:jai@localhost:5433/analysis")
+# Opt-in only: set TEST_DATABASE_URL to a DISPOSABLE Postgres. If unset, these tests SKIP —
+# so pytest/pre-commit can never truncate the app's real `analysis` DB.
+PG_URL = os.getenv("TEST_DATABASE_URL")
 POSITIVE = next(c for c in CONVERSATIONS if c.feedback.rating is True)
 
 
 @pytest.fixture
 def store() -> SqlResultStore:
+    if not PG_URL:
+        pytest.skip("set TEST_DATABASE_URL (a disposable DB) to run SQL-store tests")
     try:
         s = SqlResultStore(PG_URL)  # create_all connects → raises if unreachable
     except Exception as exc:  # noqa: BLE001 - report why we skipped
-        pytest.skip(f"Postgres not reachable at {PG_URL}: {type(exc).__name__}")
+        pytest.skip(f"Postgres not reachable at TEST_DATABASE_URL: {type(exc).__name__}")
     engine = create_engine(PG_URL)
     with engine.begin() as conn:
         conn.execute(text("TRUNCATE analysis, conversation, failed"))

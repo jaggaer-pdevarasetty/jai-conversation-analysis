@@ -13,6 +13,7 @@ before anything reaches the common store.
 
 from __future__ import annotations
 
+import time
 from collections import defaultdict
 from datetime import datetime
 from typing import Any
@@ -117,15 +118,37 @@ def _resolve_session_id(hc: httpx.Client, base: str, project: str, headers: dict
     return sessions[0]["id"]
 
 
-def _query_runs(hc: httpx.Client, base: str, session_id: str, limit: int, headers: dict) -> list[dict]:
-    resp = hc.post(
-        f"{base}/api/v1/runs/query",
-        headers=headers,
-        json={"session": [session_id], "limit": limit},
-    )
+def _post_with_retry(hc: httpx.Client, url: str, headers: dict, body: dict, retries: int = 5) -> httpx.Response:
+    # Respect LangSmith rate limits: back off on 429 (Retry-After if given, else exponential).
+    for attempt in range(retries):
+        resp = hc.post(url, headers=headers, json=body)
+        if resp.status_code == 429 and attempt < retries - 1:
+            time.sleep(min(float(resp.headers.get("retry-after", 2**attempt)), 30.0))
+            continue
+        resp.raise_for_status()
+        return resp
     resp.raise_for_status()
-    data = resp.json()
-    return data.get("runs", data if isinstance(data, list) else [])
+    return resp
+
+
+def _query_runs(hc: httpx.Client, base: str, session_id: str, limit: int, headers: dict) -> list[dict]:
+    # LangSmith caps a page at 100 and returns a cursor; paginate until `limit` or exhausted.
+    runs: list[dict] = []
+    cursor: str | None = None
+    while len(runs) < limit:
+        body: dict = {"session": [session_id], "limit": min(100, limit - len(runs))}
+        if cursor:
+            body["cursor"] = cursor
+        resp = _post_with_retry(hc, f"{base}/api/v1/runs/query", headers, body)
+        data = resp.json()
+        page = data.get("runs", []) if isinstance(data, dict) else data
+        if not page:
+            break
+        runs.extend(page)
+        cursor = (data.get("cursors") or {}).get("next") if isinstance(data, dict) else None
+        if not cursor:
+            break
+    return runs[:limit]
 
 
 def load_from_langsmith(limit: int | None = None, http_client: httpx.Client | None = None) -> list[Conversation]:
@@ -142,6 +165,10 @@ def load_from_langsmith(limit: int | None = None, http_client: httpx.Client | No
 
 
 def load_conversations() -> list[Conversation]:
+    if settings.source == "chatdb":
+        from .chatdb import load_from_chatdb
+
+        return load_from_chatdb()
     if settings.source == "langsmith":
         return load_from_langsmith()
     return CONVERSATIONS

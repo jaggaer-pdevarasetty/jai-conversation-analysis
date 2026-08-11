@@ -24,7 +24,8 @@ app = FastAPI(title="JAI Conversation Analysis API", version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    # Dev: allow the reviewer UI from any localhost/127.0.0.1 port (incl. browser previews).
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )

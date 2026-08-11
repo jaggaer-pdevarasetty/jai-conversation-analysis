@@ -27,14 +27,16 @@ for _ca_var in ("REQUESTS_CA_BUNDLE", "SSL_CERT_FILE"):
 class Settings:
     # Chat DB — READ ONLY (SELECT). Empty in dev → analyzer runs on fixtures.
     chat_db_url: str = os.getenv("CHAT_DB_URL", "")
+    chat_db_schema: str = os.getenv("CHAT_DB_SCHEMA", "jai_agentos_schema_uit")
+    chatdb_limit: int = int(os.getenv("CHATDB_LIMIT", "200"))
 
     # LangSmith (read) — authoritative tokens/latency + source of real conversations.
     langsmith_base_url: str = os.getenv("LANGSMITH_BASE_URL", "https://api.smith.langchain.com")
     langsmith_api_key: str = os.getenv("LANGSMITH_API_KEY", "")
     langsmith_project: str = os.getenv("LANGSMITH_PROJECT", "jai-orchestrator")
-    langsmith_limit: int = int(os.getenv("LANGSMITH_LIMIT", "100"))
+    langsmith_limit: int = int(os.getenv("LANGSMITH_LIMIT", "1000"))  # total runs cap (paginated)
 
-    # Conversation source: "fixtures" (default, samples) or "langsmith" (real conversations).
+    # Conversation source: "fixtures" (samples) | "chatdb" (REAL, canonical) | "langsmith".
     source: str = os.getenv("SOURCE", "fixtures")
 
     # Gemini via VERTEX AI only (enterprise). Vertex uses OAuth2 (service account / ADC via

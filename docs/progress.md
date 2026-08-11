@@ -97,14 +97,26 @@ non-English handling. Working on branch **`feature/J1-93353-conversation-analysi
 - **Bug fixed** (found via real data): LangSmith timestamps are tz-naive → normalise to UTC
   in `run.py` (eligibility no longer crashes). Regression test added. **46 pytest green.**
 
+## Done — execution increment 7 (REAL chat DB, correctness fixes)
+- **Root-cause + fix:** LangSmith-as-source produced garbage (duplicated text + prompt
+  templates) → everything `failed_to_resolve`. Built `app/chatdb.py` — **READ-ONLY** reader
+  of the real chat DB schema `jai_agentos_schema_uit` (db `jai_agentos_uit`):
+  conversations/messages/feedback/token_usage. `SOURCE=chatdb` is now canonical.
+- **Verified correct**: 10 real conversations → varied categories via Vertex
+  (resolved / failed_to_resolve / out_of_scope) + real next steps + authoritative tokens.
+- **UI-empty fixed**: CORS only allowed `localhost:3000`; widened to any localhost/127.0.0.1
+  port (browser previews were blocked).
+- **Tests never touch the app DB**: SQL-store tests skip unless `TEST_DATABASE_URL` is set
+  (45 pass, 3 skip). Dropped the `analysis_test` DB I mistakenly created; deleted the pem.
+- **Pagination + 429 backoff** for LangSmith (kept for token enrichment only).
+- Facts: results store = **podman Postgres** `localhost:5433/analysis` (NOT sqlite).
+
 ## Next
-1. **Pick the real project** in `.env` (`LANGSMITH_PROJECT`) — all 4 have data; which holds
-   the JAI Assist conversations to analyse? Remove the `REQUESTS_CA_BUNDLE` placeholder line.
-2. **Validate/tune the run→message mapping** — prelogin_uit's 12 all landed `failed_to_resolve`
-   under the rules; confirm against real transcripts + enable Vertex (add project+location).
-3. Grow the **gold set** to 100–200 real labelled conversations for a real ≥85% measurement.
-4. Client **detail view** (transcript + tokens/TTFT) + override control UI.
-5. CI: add a Postgres service so the SQL store tests run (not skip).
+1. Repopulate `analysis` from `chatdb` via Vertex + restart backend (approved) → UI shows real data.
+2. Fix `.env`: `CHAT_DB_URL` db = `jai_agentos_uit`, `CHAT_DB_SCHEMA=jai_agentos_schema_uit`, `SOURCE=chatdb`.
+3. Grow the eval gold set to 100–200 real labelled conversations (≥85% gate).
+4. Client detail view (transcript + tokens) + override UI.
+5. Scheduler wiring (every 4h) with rate-limit-aware batch.
 
 ## Blockers / needs
 - **Credentials:** LangSmith read key; chat DB read-only connection details; Gemini access.
