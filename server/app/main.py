@@ -230,15 +230,30 @@ def get_conversation(conversation_id: str):
     return payload
 
 
+_NEGATIVE_CATEGORIES = {"negative_feedback", "failed_to_resolve"}
+
+
 @api.get("/feedback")
-def feedback_conversations():
-    """Conversations where the user gave EXPLICIT thumbs feedback — rich analytics row per
-    conversation (tenant/user/title/tokens/timestamps + category + the deep root-cause
-    analysis + the user's remark) for a reviewer table."""
+def feedback_conversations(
+    scope: str = Query(default="thumbs", pattern="^(thumbs|outcomes|all)$"),
+):
+    """Feedback / negative-signal conversations, rich row per conversation for a reviewer table.
+
+    scope=thumbs (default): only EXPLICIT thumbs feedback (up/down).
+    scope=outcomes: conversations the model judged negative (failed_to_resolve /
+        negative_feedback) even without a thumb — the large 'went badly' set.
+    scope=all: union of both.
+    """
     items = []
     for record in store.list():
         conv = store.get_conversation(record.conversation_id)
-        if conv is None or conv.feedback.rating is None:
+        has_thumbs = conv is not None and conv.feedback.rating is not None
+        neg_outcome = record.category in _NEGATIVE_CATEGORIES
+        if scope == "thumbs" and not has_thumbs:
+            continue
+        if scope == "outcomes" and not neg_outcome:
+            continue
+        if scope == "all" and not (has_thumbs or neg_outcome):
             continue
         m = record.metrics
         deep = asdict(record.deep) if record.deep else None
@@ -248,8 +263,9 @@ def feedback_conversations():
                 "category": record.category,
                 "model_category": record.model_category,
                 "confidence": record.confidence,
-                "rating": conv.feedback.rating,
-                "comment": conv.feedback.comment,
+                "rating": conv.feedback.rating if conv else None,
+                "comment": conv.feedback.comment if conv else None,
+                "has_thumbs": has_thumbs,
                 "recommended_next_step": record.recommended_next_step,
                 "rationale": record.rationale,
                 "why_it_happened": (deep or {}).get("why_it_happened", ""),
@@ -270,12 +286,23 @@ def feedback_conversations():
     for it in items:
         it.update(meta.get(it["conversation_id"], {}))
 
-    items.sort(key=lambda it: (it["rating"] is not False))  # thumbs-down first (most actionable)
+    def _rank(it) -> int:  # thumbs-down first, then negative outcomes, then thumbs-up, then rest
+        if it["rating"] is False:
+            return 0
+        if it["category"] in _NEGATIVE_CATEGORIES:
+            return 1
+        if it["rating"] is True:
+            return 2
+        return 3
+
+    items.sort(key=_rank)
     return {
         "items": items,
         "total": len(items),
-        "positive": sum(1 for it in items if it["rating"]),
-        "negative": sum(1 for it in items if not it["rating"]),
+        "scope": scope,
+        "positive": sum(1 for it in items if it["rating"] is True),  # thumbs-up (back-compat)
+        "negative": sum(1 for it in items if it["rating"] is False),  # thumbs-down (back-compat)
+        "negative_outcomes": sum(1 for it in items if it["category"] in _NEGATIVE_CATEGORIES),
     }
 
 
