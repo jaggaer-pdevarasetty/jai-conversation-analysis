@@ -18,6 +18,7 @@ Decision, Consequences, and (optionally) Alternatives considered.
 - ADR-0009 — Persistent common store on PostgreSQL (container; SQLite dropped)
 - ADR-0010 — Gemini classification via Vertex AI (enterprise) + rules fallback
 - ADR-0011 — Evaluation harness + accuracy hard gate (≥85%, resolved-mislabel critical)
+- ADR-0012 — Conversation sources (fixtures | LangSmith); Zscaler via env CA
 
 ## Rule
 When you make a non-trivial choice during a task, add or update an ADR in the same change,

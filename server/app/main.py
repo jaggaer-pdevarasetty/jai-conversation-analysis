@@ -13,11 +13,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .config import settings
-from .domain.models import CATEGORIES, AnalysisRecord, CommonConversation
-from .fixtures import CONVERSATIONS
+from .domain.models import CATEGORIES, AnalysisRecord, CommonConversation, Conversation
 from .gemini import make_classifier
 from .problem import problem_response
 from .run import run_analysis
+from .sources import load_conversations
 from .store_factory import make_store
 
 app = FastAPI(title="JAI Conversation Analysis API", version="0.2.0")
@@ -29,11 +29,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Common store (memory by default; SQLite/Postgres when STORE_BACKEND=sql). Seeded by one
-# analysis run over the source. In production the scheduler triggers run_analysis every 4h
-# against the chat-DB reader; classification uses Gemini when GEMINI_API_KEY is set.
+
+def _load_source() -> list[Conversation]:
+    """Load conversations from the configured source; never crash startup on a source error."""
+    try:
+        return load_conversations()
+    except Exception as exc:  # noqa: BLE001 - surface, don't crash
+        print(f"[warn] source '{settings.source}' load failed: {type(exc).__name__}", flush=True)
+        return []
+
+
+# Common store (memory by default; Postgres when STORE_BACKEND=sql). Seeded by one analysis
+# run over the configured source (fixtures | langsmith). In production a scheduler triggers
+# run_analysis every 4h; classification uses Vertex when configured, else deterministic rules.
 store = make_store()
-latest_run = run_analysis(store, CONVERSATIONS, classify=make_classifier())
+latest_run = run_analysis(store, _load_source(), classify=make_classifier())
 
 
 def require_reviewer(x_roles: str | None = Header(default=None)) -> None:
@@ -160,7 +170,7 @@ def latest_run_summary():
 def trigger_run():
     """Trigger a run (scheduler / reviewer). Re-analyses eligible, not-yet-analysed convs."""
     global latest_run
-    latest_run = run_analysis(store, CONVERSATIONS, classify=make_classifier())
+    latest_run = run_analysis(store, _load_source(), classify=make_classifier())
     return asdict(latest_run) | {"unanalysed": latest_run.unanalysed}
 
 

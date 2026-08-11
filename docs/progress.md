@@ -76,8 +76,20 @@ non-English handling. Working on branch **`feature/J1-93353-conversation-analysi
   gate**; `python -m app.eval`. Rules baseline 100%; **live Vertex eval 100%** on the fixture
   gold set. Tests green: **server 42 pytest**.
 
+## Done — execution increment 5 (LangSmith-as-source)
+- **LangSmith source built** (ADR-0012): `SOURCE=langsmith` pulls runs from project
+  `jai-orchestrator`, groups by conversation_id → Conversation (messages best-effort;
+  tokens/latency authoritative); env-aware client (Zscaler CA/proxy); startup fails safe.
+  Mock-tested (45 pytest green). Selector `SOURCE=fixtures|langsmith` (default fixtures).
+- **DB check:** Postgres reachable (`localhost:5433/analysis`); **but `.env` still has
+  STORE_BACKEND=memory** → add `STORE_BACKEND=sql` to persist there.
+- **LangSmith live status:** from this machine → `CERTIFICATE_VERIFY_FAILED` (Zscaler).
+  Fix locally by setting `REQUESTS_CA_BUNDLE`=Zscaler root CA (TLS never disabled), or run
+  in GCP. No code blocker.
+
 ## Next
-1. **LangSmith-as-source ingestion** → real conversations (mock-tested here; real from GCP).
+1. **Enable real data:** set `SOURCE=langsmith` + `STORE_BACKEND=sql` (+ `REQUESTS_CA_BUNDLE`
+   if local) → live-test ingestion + validate the run→message mapping against a real sample.
 2. Grow the **gold set** to 100–200 real labelled conversations for a real ≥85% measurement.
 3. Client **detail view** (transcript + tokens/TTFT) + override control UI.
 4. CI: add a Postgres service so the SQL store tests run (not skip).

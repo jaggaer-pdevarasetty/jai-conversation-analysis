@@ -19,10 +19,14 @@ class Settings:
     # Chat DB — READ ONLY (SELECT). Empty in dev → analyzer runs on fixtures.
     chat_db_url: str = os.getenv("CHAT_DB_URL", "")
 
-    # LangSmith (read) — authoritative tokens/latency.
+    # LangSmith (read) — authoritative tokens/latency + source of real conversations.
     langsmith_base_url: str = os.getenv("LANGSMITH_BASE_URL", "https://api.smith.langchain.com")
     langsmith_api_key: str = os.getenv("LANGSMITH_API_KEY", "")
     langsmith_project: str = os.getenv("LANGSMITH_PROJECT", "jai-orchestrator")
+    langsmith_limit: int = int(os.getenv("LANGSMITH_LIMIT", "100"))
+
+    # Conversation source: "fixtures" (default, samples) or "langsmith" (real conversations).
+    source: str = os.getenv("SOURCE", "fixtures")
 
     # Gemini via VERTEX AI only (enterprise). Vertex uses OAuth2 (service account / ADC via
     # GOOGLE_APPLICATION_CREDENTIALS) + project + location — NOT an API key. Classification
