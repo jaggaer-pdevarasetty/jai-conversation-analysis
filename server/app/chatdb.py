@@ -22,8 +22,11 @@ from .domain.models import Conversation, Feedback, Message
 
 
 def _engine():
-    # READ-ONLY use; short connect timeout so a bad network fails fast.
-    return create_engine(settings.chat_db_url, connect_args={"connect_timeout": 15})
+    # READ-ONLY use; connect to the real DB (chat_db_name) regardless of the URL's db part.
+    from sqlalchemy.engine import make_url
+
+    url = make_url(settings.chat_db_url).set(database=settings.chat_db_name)
+    return create_engine(url, connect_args={"connect_timeout": 15})
 
 
 def load_from_chatdb(limit: int | None = None, engine=None) -> list[Conversation]:

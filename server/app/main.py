@@ -167,6 +167,47 @@ def latest_run_summary():
     return asdict(latest_run) | {"unanalysed": latest_run.unanalysed}
 
 
+# ── Admin dashboard: tenant → user → conversation drill-down (authorised view) ──
+@api.get("/dashboard/overview")
+def dashboard_overview():
+    from . import dashboard
+
+    try:
+        return dashboard.overview(store)
+    except Exception as exc:  # noqa: BLE001
+        return problem_response(503, "Chat DB unavailable", type(exc).__name__)
+
+
+@api.get("/dashboard/tenants")
+def dashboard_tenants():
+    from . import dashboard
+
+    try:
+        return {"items": dashboard.tenants()}
+    except Exception as exc:  # noqa: BLE001
+        return problem_response(503, "Chat DB unavailable", type(exc).__name__)
+
+
+@api.get("/dashboard/tenants/{tenant_id}/users")
+def dashboard_users(tenant_id: str):
+    from . import dashboard
+
+    try:
+        return {"items": dashboard.users(tenant_id)}
+    except Exception as exc:  # noqa: BLE001
+        return problem_response(503, "Chat DB unavailable", type(exc).__name__)
+
+
+@api.get("/dashboard/tenants/{tenant_id}/users/{user_id}/conversations")
+def dashboard_user_conversations(tenant_id: str, user_id: str):
+    from . import dashboard
+
+    try:
+        return {"items": dashboard.user_conversations(store, tenant_id, user_id)}
+    except Exception as exc:  # noqa: BLE001
+        return problem_response(503, "Chat DB unavailable", type(exc).__name__)
+
+
 @api.post("/runs")
 def trigger_run():
     """Trigger a run (scheduler / reviewer). Re-analyses eligible, not-yet-analysed convs."""

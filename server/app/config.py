@@ -27,6 +27,9 @@ for _ca_var in ("REQUESTS_CA_BUNDLE", "SSL_CERT_FILE"):
 class Settings:
     # Chat DB — READ ONLY (SELECT). Empty in dev → analyzer runs on fixtures.
     chat_db_url: str = os.getenv("CHAT_DB_URL", "")
+    # The real conversations live in DB `jai_agentos_uit`, schema `jai_agentos_schema_uit`.
+    # We override the database name so a CHAT_DB_URL that points at the schema name still works.
+    chat_db_name: str = os.getenv("CHAT_DB_NAME", "jai_agentos_uit")
     chat_db_schema: str = os.getenv("CHAT_DB_SCHEMA", "jai_agentos_schema_uit")
     chatdb_limit: int = int(os.getenv("CHATDB_LIMIT", "200"))
 
