@@ -19,3 +19,7 @@ coverage/
 
 # build info
 *.tsbuildinfo
+
+# local-only working docs (never commit)
+arch.md
+master.md

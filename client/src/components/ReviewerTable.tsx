@@ -2,6 +2,7 @@
 
 import {
   Alert,
+  Link as MuiLink,
   Paper,
   Table,
   TableBody,
@@ -10,6 +11,7 @@ import {
   TableHead,
   TableRow,
 } from "@mui/material";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { fetchAnalysis, type ListItem, type ListResponse } from "../services/analysisApi";
 
@@ -82,7 +84,11 @@ export function ReviewerTable({ initial }: { initial?: ListResponse }) {
           <TableBody>
             {items.map((it) => (
               <TableRow key={it.conversation_id}>
-                <TableCell>{it.conversation_id}</TableCell>
+                <TableCell>
+                  <MuiLink component={Link} href={`/conversations/${it.conversation_id}`}>
+                    {it.conversation_id}
+                  </MuiLink>
+                </TableCell>
                 <TableCell>
                   {it.category}
                   {it.overridden ? " (overridden)" : ""}
