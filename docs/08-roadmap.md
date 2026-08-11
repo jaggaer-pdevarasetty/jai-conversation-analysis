@@ -44,6 +44,41 @@ roadmap** (needs access/infra we don't yet have). Full task detail lives here; s
   secondary tag.
 - Rollout: feature flag + shadow run → reviewer walkthrough → PII/GDPR sign-off.
 
+## Next 30% (from ~70% → production-ready) — 3 phases, ~10% each
+
+Current state: real chat-DB source, dynamic batched Gemini analysis (PII scrubbed via
+regex + spaCy NER before the LLM), Postgres store, batch + on-demand + lazy analyse,
+reviewer dashboard (tenant→user→conversation + detail + override). What is left:
+
+### Phase A — Run itself + full coverage (AC-1, AC-9, AC-11) ~10%
+- **Scheduler**: APScheduler job every 4h → analyse ALL eligible, not-yet-analysed convos,
+  paginated by a `last_message_at` watermark (not a fixed CHATDB_LIMIT). Overlap-safe.
+- **Coverage/freshness**: incremental sweeps so 100% get analysed over time; re-analyse
+  policy on `analyzer_version`/prompt bumps (backfill job).
+- **Reliability**: exponential-backoff retry, a dead-letter after N failures, `/readiness`
+  probe, graceful degrade when Vertex/chat-DB is down (already fail-safe; formalise).
+
+### Phase B — Trustworthy (accuracy + auth + privacy + observability) ~10%
+- **Eval gold set**: 100–200 human-labelled real conversations; wire `app.eval` into CI;
+  enforce ≥85% agreement + zero critical mislabels (resolved-vs-failed) — hard gate.
+- **AuthN/AuthZ**: real reviewer SSO/JWT; enforce the RBAC gate; audit overrides (who/when).
+- **Privacy governance**: resolve the tenant/user view vs AC-10 de-id (config: admin vs
+  pooled mode); Presidio-grade PII pass + a privacy/GDPR sign-off checklist.
+- **Observability**: structured logs, Prometheus metrics (runs, latency, failures, cost),
+  alerting; a lightweight reporting view (top issues, new use-cases, drift) from J1-93353.
+
+### Phase C — Deployable at scale ~10%
+- **Packaging/CI-CD**: Dockerfiles (client+server), pipeline (lint/type/test/contract/e2e),
+  secrets via GCP Secret Manager, Alembic migrations for the results store.
+- **In-VPC deploy** (Cloud Run) so the chat DB is reachable without a personal login; use a
+  dedicated **read-only service account**; TTFT instrumentation with the orchestrator team.
+- **Performance/scale**: fix dashboard N+1 (batch store lookups), DB indexes + pooling,
+  a durable queue/worker for analysis, response caching; OpenAPI **contract tests** +
+  Playwright **e2e** for the reviewer flow.
+
+> UI productionisation (redesign, filters, search, pagination, a11y) is tracked in the
+> separate UI session; the backend contracts above are built to support it.
+
 ## Sequencing
 `H0 → H1 → H2 → H3 (A if time else B) → H4`. H1.5 prompt work can start on exported
 sample transcripts in parallel with H0. Track B follows scope + access confirmation.

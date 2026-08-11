@@ -135,6 +135,8 @@ non-English handling. Working on branch **`feature/J1-93353-conversation-analysi
   message and analysis counts, lazy-analysis refresh, and safe review links only after analysis.
 - **Scope clarity:** tenant pages are labelled Authorised admin view; pooled conversation routes
   remain separately labelled De-identified review.
+- Green: **client 10 jest + typecheck + lint + clean production build; server 49 pytest, 3 skipped**.
+  Browser-checked tenant directory and users at desktop/mobile widths with no runtime errors or overflow.
 
 ## Next
 1. Repopulate `analysis` from `chatdb` via Vertex + restart backend (approved) → UI shows real data.
