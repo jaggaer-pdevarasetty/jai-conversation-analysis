@@ -13,6 +13,15 @@ from dotenv import load_dotenv
 if os.getenv("DOTENV_DISABLE") != "1":
     load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
+# Guard: a CA-bundle env var pointing at a missing file breaks libraries that read it
+# directly (requests / google-genai). Drop it (with a warning) so they fall back to certifi
+# / the OS trust store. This never disables TLS verification.
+for _ca_var in ("REQUESTS_CA_BUNDLE", "SSL_CERT_FILE"):
+    _p = os.environ.get(_ca_var)
+    if _p and not os.path.isfile(os.path.expanduser(os.path.expandvars(_p))):
+        print(f"[warn] {_ca_var} points to a missing file ({_p}); ignoring it", flush=True)
+        os.environ.pop(_ca_var, None)
+
 
 @dataclass(frozen=True)
 class Settings:
