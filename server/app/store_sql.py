@@ -1,13 +1,13 @@
 """Persistent common store (ADR-0009).
 
-Same interface as InMemoryResultStore, backed by SQLAlchemy so it runs on SQLite locally
-(default) and PostgreSQL in production (RESULTS_DB_URL / docker-compose.postgres.yml).
-Still conversation_id-only and de-identified (ADR-0007) — no tenant/user columns.
+Same interface as the in-memory CommonStore, backed by SQLAlchemy on **PostgreSQL**
+(RESULTS_DB_URL; run locally via podman/Docker — see docker-compose.postgres.yml). SQLite
+is intentionally not used for storing data. Still conversation_id-only and de-identified
+(ADR-0007) — no tenant/user columns.
 """
 
 from __future__ import annotations
 
-import os
 from dataclasses import asdict
 
 from sqlalchemy import JSON, Column, MetaData, String, Table, create_engine, delete, func, select
@@ -69,12 +69,6 @@ def _row_to_conv(data: dict) -> CommonConversation:
 
 class SqlResultStore:
     def __init__(self, url: str) -> None:
-        # Ensure the parent dir exists for file-based SQLite URLs (sqlite:///./data/x.db).
-        if url.startswith("sqlite:///"):
-            path = url.removeprefix("sqlite:///")
-            parent = os.path.dirname(path)
-            if parent:
-                os.makedirs(parent, exist_ok=True)
         self._engine = create_engine(url, future=True)
         _metadata.create_all(self._engine)
 

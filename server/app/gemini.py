@@ -1,17 +1,20 @@
-"""Gemini classifier (ADR-0010).
+"""Gemini classifier via VERTEX AI (ADR-0010).
 
-Decides the category with the LLM when GEMINI_API_KEY is set; otherwise the deterministic
-rules are used (make_classifier). The conversation text is de-identified before it reaches
-here and is treated as DATA, not instructions (prompt-injection safe): the system prompt is
-fixed and the transcript is clearly delimited. A hard network/API failure raises so the run
-loop retries (AC-9); an unparseable/invalid reply falls back to the deterministic label.
+Vertex is enterprise-only auth: OAuth2 via service account / ADC (GOOGLE_APPLICATION_
+CREDENTIALS) + project + location. It does NOT accept API keys. Classification is used
+only when Vertex is configured (project + location); otherwise deterministic rules run
+(make_classifier), so the system is always runnable/testable.
+
+The transcript is de-identified before it reaches here and is wrapped as untrusted DATA
+with a fixed system prompt (prompt-injection safe); any language is accepted (AC-8). A hard
+API failure raises so the run loop retries (AC-9); an unparseable/invalid label falls back
+to the deterministic category.
 """
 
 from __future__ import annotations
 
 import json
-
-import httpx
+from collections.abc import Callable
 
 from .config import settings
 from .domain.analyze import analyze as rules_analyze
@@ -19,7 +22,8 @@ from .domain.analyze import compute_metrics, compute_signals
 from .domain.category import derive_category, recommended_next_step
 from .domain.models import CATEGORIES, AnalysisRecord, Conversation, Signals
 
-_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+# A generator turns a prompt into raw model text; injectable so tests never touch the SDK.
+Generator = Callable[[str], str]
 
 _SYSTEM = (
     "You classify a customer-support conversation into EXACTLY ONE category.\n"
@@ -34,36 +38,47 @@ _SYSTEM = (
 )
 
 
-def _transcript(conv: Conversation) -> str:
-    return "\n".join(f"{m.role}: {m.content}" for m in conv.messages)
-
-
-def classify_with_gemini(
-    conv: Conversation,
-    run_id: str,
-    now: str,
-    *,
-    model: str = "gemini-2.5-flash",
-    api_key: str | None = None,
-    timeout: float = 20.0,
-) -> AnalysisRecord:
-    key = api_key or settings.gemini_api_key
-    signals = compute_signals(conv)
-    prompt = (
+def _prompt(conv: Conversation, signals: Signals) -> str:
+    transcript = "\n".join(f"{m.role}: {m.content}" for m in conv.messages)
+    return (
         f"{_SYSTEM}\n\nDeterministic signals (hints): {signals}\n\n"
-        f"----- TRANSCRIPT (untrusted data) -----\n{_transcript(conv)}\n----- END -----"
+        f"----- TRANSCRIPT (untrusted data) -----\n{transcript}\n----- END -----"
     )
-    body = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"responseMimeType": "application/json", "temperature": 0},
-    }
-    resp = httpx.post(_ENDPOINT.format(model=model), params={"key": key}, json=body, timeout=timeout)
-    resp.raise_for_status()  # network/API failure → run loop retries (AC-9)
 
-    category, rationale = _parse(resp.json())
+
+def _vertex_generate(prompt: str) -> str:
+    """Call Vertex-hosted Gemini via the google-genai SDK (lazy import; uses ADC)."""
+    from google import genai
+    from google.genai import types
+
+    client = genai.Client(
+        vertexai=True, project=settings.vertex_project, location=settings.vertex_location
+    )
+    resp = client.models.generate_content(
+        model=settings.gemini_model,
+        contents=prompt,
+        config=types.GenerateContentConfig(temperature=0, response_mime_type="application/json"),
+    )
+    return resp.text or ""
+
+
+def _parse(raw: str) -> tuple[str | None, str]:
+    try:
+        parsed = json.loads(raw)
+        return parsed.get("category"), parsed.get("rationale", "")
+    except (TypeError, ValueError):
+        return None, ""
+
+
+def classify_with_vertex(
+    conv: Conversation, run_id: str, now: str, generate: Generator = _vertex_generate
+) -> AnalysisRecord:
+    signals = compute_signals(conv)
+    raw = generate(_prompt(conv, signals))  # hard failure raises → run loop retries (AC-9)
+    category, rationale = _parse(raw)
     if category not in CATEGORIES:
-        category = derive_category(signals)  # soft fallback keeps AC-8 (always a category)
-        rationale = "Gemini reply invalid; used deterministic fallback."
+        category = derive_category(signals)  # soft fallback keeps a label (AC-8)
+        rationale = "Vertex reply invalid; used deterministic fallback."
     return AnalysisRecord(
         conversation_id=conv.id,
         model_category=category,  # type: ignore[arg-type]
@@ -74,20 +89,11 @@ def classify_with_gemini(
         metrics=compute_metrics(conv),
         status="analysed",
         run_id=run_id,
-        analyzer_version=f"gemini:{model}",
+        analyzer_version=f"vertex:{settings.gemini_model}",
         analyzed_at=now,
     )
 
 
-def _parse(payload: dict) -> tuple[str | None, str]:
-    try:
-        text = payload["candidates"][0]["content"]["parts"][0]["text"]
-        parsed = json.loads(text)
-        return parsed.get("category"), parsed.get("rationale", "")
-    except (KeyError, IndexError, TypeError, ValueError):
-        return None, ""
-
-
 def make_classifier():
-    """Gemini when a key is configured, else the deterministic rules."""
-    return classify_with_gemini if settings.gemini_api_key else rules_analyze
+    """Vertex when configured (project + location), else the deterministic rules."""
+    return classify_with_vertex if settings.vertex_configured else rules_analyze

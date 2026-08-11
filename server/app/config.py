@@ -4,23 +4,46 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Load the repo-root .env before reading settings (real env vars still win; override=False).
+# Tests set DOTENV_DISABLE=1 (conftest) so a developer's real .env never leaks into them.
+if os.getenv("DOTENV_DISABLE") != "1":
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 
 @dataclass(frozen=True)
 class Settings:
     # Chat DB — READ ONLY (SELECT). Empty in dev → analyzer runs on fixtures.
     chat_db_url: str = os.getenv("CHAT_DB_URL", "")
+
     # LangSmith (read) — authoritative tokens/latency.
     langsmith_base_url: str = os.getenv("LANGSMITH_BASE_URL", "https://api.smith.langchain.com")
     langsmith_api_key: str = os.getenv("LANGSMITH_API_KEY", "")
     langsmith_project: str = os.getenv("LANGSMITH_PROJECT", "jai-orchestrator")
-    # Gemini classifier (empty → deterministic rules fallback).
-    gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
-    # Common store: "memory" (default) or "sql" (SQLite locally / Postgres via URL).
+
+    # Gemini via VERTEX AI only (enterprise). Vertex uses OAuth2 (service account / ADC via
+    # GOOGLE_APPLICATION_CREDENTIALS) + project + location — NOT an API key. Classification
+    # is enabled only when project + location are set; otherwise deterministic rules run.
+    vertex_project: str = os.getenv("GOOGLE_CLOUD_PROJECT", "")
+    vertex_location: str = os.getenv("GOOGLE_CLOUD_LOCATION", "")
+    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
+    # Common store: "memory" (default, for tests/no-DB) or "sql" (Postgres — ADR-0009).
+    # SQLite is intentionally NOT supported for storing data; use Postgres (podman/Docker).
     store_backend: str = os.getenv("STORE_BACKEND", "memory")
-    results_db_url: str = os.getenv("RESULTS_DB_URL", "sqlite:///./data/analysis.db")
+    results_db_url: str = os.getenv(
+        "RESULTS_DB_URL", "postgresql+psycopg://jai:jai@localhost:5433/analysis"
+    )
+
     # RBAC gate for the reviewer API (off in dev/tests).
     rbac_enabled: bool = os.getenv("RBAC_ENABLED", "false").lower() == "true"
+
+    @property
+    def vertex_configured(self) -> bool:
+        return bool(self.vertex_project and self.vertex_location)
 
 
 settings = Settings()

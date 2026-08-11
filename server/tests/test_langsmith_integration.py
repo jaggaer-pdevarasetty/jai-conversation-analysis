@@ -7,11 +7,11 @@ import pytest
 from app import langsmith
 
 
-def _mock_client(handler):
+def _client(handler) -> httpx.Client:
     return httpx.Client(transport=httpx.MockTransport(handler))
 
 
-def test_fetch_run_metrics_parses_tokens_and_ttft(monkeypatch):
+def test_fetch_run_metrics_parses_tokens_and_ttft():
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/runs/run-1"
         return httpx.Response(
@@ -19,15 +19,13 @@ def test_fetch_run_metrics_parses_tokens_and_ttft(monkeypatch):
             json={"prompt_tokens": 120, "input_tokens": 130, "output_tokens": 48, "ttft_ms": 340},
         )
 
-    monkeypatch.setattr(httpx, "get", lambda url, **kw: _mock_client(handler).get(url))
-    m = langsmith.fetch_run_metrics("https://ls.test", "run-1")
+    m = langsmith.fetch_run_metrics("https://ls.test", "run-1", http_client=_client(handler))
     assert (m.prompt_tokens, m.input_tokens, m.output_tokens, m.ttft_ms) == (120, 130, 48, 340)
 
 
-def test_fetch_run_metrics_raises_on_error(monkeypatch):
+def test_fetch_run_metrics_raises_on_error():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500)
 
-    monkeypatch.setattr(httpx, "get", lambda url, **kw: _mock_client(handler).get(url))
     with pytest.raises(httpx.HTTPStatusError):
-        langsmith.fetch_run_metrics("https://ls.test", "run-err")
+        langsmith.fetch_run_metrics("https://ls.test", "run-err", http_client=_client(handler))

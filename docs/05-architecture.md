@@ -3,11 +3,23 @@
 > Read before implementing. Decisions in `docs/decisions/`. Source of truth: **J1-93353**
 > (ADR-0005). Stack: **Next.js client + FastAPI server** (ADR-0006).
 
+## Where the chats live (source of record)
+Per Confluence **"Interim JAI Agentic Platform – 26.1 Architecture"** (JDDEV/927268867),
+JAI Assist conversations are stored in **GCP Cloud SQL for PostgreSQL** — "Chat history,
+Conversation context, Agent checkpoints and execution state". It is **private-IP only**,
+reachable **only from inside the VPC** (Private Service Access); creds in Secret Manager.
+RAG docs live in Datastore (separate); LangSmith is the separate observability/eval plane.
+
+**Two distinct databases — do not conflate:**
+- **Chat DB (source, READ-ONLY):** the private-IP Cloud SQL Postgres above. We only SELECT.
+- **Common store (ours):** a *separate* DB (local Postgres/SQLite, ADR-0009) holding only
+  our **de-identified analysis results**. Never the chat DB.
+
 ## Access constraints (ADR-0001)
 | Resource | Access | Consequence |
 |---|---|---|
-| Chat Cloud SQL DB | **SELECT only** | read conversations/messages/feedback/token_usage; no writes anywhere in it |
-| Any org DB | **no write** | analysis results live only in our own store |
+| Chat DB (Cloud SQL Postgres, private-IP) | **SELECT only** | read conversations/messages/feedback/token_usage; no writes anywhere in it; reachable only in-VPC / via Cloud SQL Auth Proxy |
+| Any org DB | **no write** | analysis results live only in our own common store |
 | LangSmith | read (15-day retention) | authoritative prompt/input/output tokens + timing |
 | LLM | Gemini | category + next-step generation |
 

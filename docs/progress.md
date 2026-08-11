@@ -56,13 +56,24 @@ non-English handling. Working on branch **`feature/J1-93353-conversation-analysi
   pytest + client typecheck/lint/jest; blocks commit on failure.
 - Tests green: **server 39 pytest**, **client 4 jest + tsc + lint**.
 
+## Done — execution increment 3 (env, Vertex, Postgres, Zscaler)
+- **.env loading fixed** — loads repo-root `.env`; tests hermetic (`DOTENV_DISABLE` + conftest).
+- **Vertex-only classifier** (ADR-0010): provided key confirmed unusable (Vertex rejects API
+  keys → needs SA/ADC + project + location). Uses google-genai Vertex mode; **falls back to
+  rules when Vertex isn't configured** so the UI is never blank.
+- **Postgres-only persistence** (ADR-0009): SQLite dropped; runs `postgres:16-alpine` via
+  **podman** (Docker absent) on `:5433`; store + tests verified against real Postgres.
+- **Zscaler-safe HTTP** (`app/http.py`): env CA (`REQUESTS_CA_BUNDLE`) + proxy (`HTTPS_PROXY`);
+  TLS never disabled.
+- Verified end-to-end: rules fallback → 6 analysed, 6 rows persisted in Postgres. **39 pytest green.**
+
 ## Next
-1. **Real ingestion (has creds, needs reachability):** chat-DB (SELECT) reader +
-   LangSmith-as-source so the table shows REAL conversations (fixtures are default). The
-   chat DB is private-IP — needs a reachable path from where the analyzer runs.
-2. Client **detail view** (transcript + per-conversation TTFT/tokens) + override control UI.
-3. **Eval harness** (≥85% agreement; resolved-mislabel hard gate).
-4. Scheduler wiring (Cloud Scheduler → authenticated `/api/analysis/runs`).
+1. **Enable real Vertex classification** — needs `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`,
+   `GOOGLE_APPLICATION_CREDENTIALS` (SA w/ Vertex AI User).
+2. **LangSmith-as-source ingestion** → real conversations (runs in GCP for real; Zscaler CA locally).
+3. Client **detail view** (transcript + tokens/TTFT) + override control UI.
+4. **Eval harness** (≥85% agreement; resolved-mislabel hard gate).
+5. CI: add a Postgres service so the SQL store tests run (not skip).
 
 ## Blockers / needs
 - **Credentials:** LangSmith read key; chat DB read-only connection details; Gemini access.

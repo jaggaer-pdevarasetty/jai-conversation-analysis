@@ -1,22 +1,27 @@
-# ADR-0009 — Persistent common store (SQLAlchemy: SQLite default, Postgres via Docker)
+# ADR-0009 — Persistent common store on PostgreSQL (container)
 
-**Status:** Accepted (2026-08-11)
+**Status:** Accepted (2026-08-11; revised — Postgres only, SQLite dropped)
 
 ## Context
 The common store must persist analyses, overrides, and the unanalysed/retry set across
-restarts (auditability + reliability NFRs). The team asked for a local Postgres in Docker.
-Docker is not available in every dev sandbox, so the default must also work without it.
+restarts (auditability + reliability NFRs). Direction: **store data strictly in a
+containerised PostgreSQL** (Docker). Docker isn't installed in this environment, but
+**podman** is, so we run the same `postgres:16-alpine` image via podman.
 
 ## Decision
-- Introduce `SqlResultStore` (SQLAlchemy) implementing the same interface as the in-memory
-  `CommonStore`. Selected via `STORE_BACKEND` (`memory` default for tests; `sql` for
-  persistence). URL via `RESULTS_DB_URL`.
-- **Default persistent backend = SQLite** (`sqlite:///./data/analysis.db`) — works with no
-  Docker. **Postgres** is a drop-in via `docker-compose.postgres.yml` +
-  `RESULTS_DB_URL=postgresql+psycopg://…`. Same code path (JSON columns) on both.
+- `SqlResultStore` (SQLAlchemy) implements the same interface as the in-memory
+  `CommonStore`, backed by **PostgreSQL** (`RESULTS_DB_URL`). Selected via `STORE_BACKEND=sql`.
+- **SQLite is not used for storing data** (removed). The in-memory store remains only for
+  fast, hermetic unit tests (`STORE_BACKEND=memory`, the default when no DB is configured).
+- Local Postgres runs as a container:
+  - podman: `podman run -d --name jai-analysis-postgres -e POSTGRES_USER=jai
+    -e POSTGRES_PASSWORD=jai -e POSTGRES_DB=analysis -p 5433:5432 postgres:16-alpine`
+  - Docker: `docker compose -f docker-compose.postgres.yml up -d`
 - Still **conversation_id-keyed and de-identified** (ADR-0007) — no tenant/user columns.
 
 ## Consequences
-- Tests keep using the in-memory store (fast, isolated); a dedicated SQLite test proves
-  persistence + override + failed-count against a real DB file.
-- Production can point at managed Postgres by env alone; no code change.
+- `test_store_sql.py` runs against Postgres (`TEST_DATABASE_URL`, default the local
+  container) and **skips** cleanly when no Postgres is reachable (e.g. CI without a
+  Postgres service) — so it never silently uses SQLite.
+- Production points `RESULTS_DB_URL` at managed Cloud SQL Postgres by env alone.
+- Verified end-to-end: 6 analysed conversations persisted to the container Postgres.
