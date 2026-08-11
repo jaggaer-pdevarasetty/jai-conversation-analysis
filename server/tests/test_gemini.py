@@ -37,15 +37,17 @@ def test_batch_uses_dynamic_llm_recommendation_and_confidence():
 
 
 def test_batch_makes_one_call_per_batch_size():
-    calls = {"n": 0}
+    batch_calls = {"n": 0}
 
     def counting(prompt: str) -> str:
-        calls["n"] += 1
+        if "what_happened" in prompt:  # a deep-analysis call, not a batch call
+            return "{}"
+        batch_calls["n"] += 1
         return _generate_dynamic(prompt)
 
     gemini.analyze_batch_vertex(CONVERSATIONS, "run", "t", generate=counting, batch_size=3)
-    # 6 fixtures, batch_size 3 → 2 calls (not 6)
-    assert calls["n"] == 2
+    # 6 fixtures, batch_size 3 → 2 batch calls (not 6); deep calls are separate
+    assert batch_calls["n"] == 2
 
 
 def test_batch_soft_fallback_to_rules_when_entry_missing():
@@ -62,6 +64,27 @@ def test_batch_group_hard_failure_omits_conversations():
 
 def test_make_batch_analyzer_defaults_to_rules_without_vertex():
     assert gemini.make_batch_analyzer() is gemini.analyze_batch_rules
+
+
+def test_feedback_conversation_gets_deep_analysis():
+    conv = next(c for c in CONVERSATIONS if c.feedback.rating is not None)
+
+    def gen(prompt: str) -> str:
+        if "what_happened" in prompt:  # the deep-analysis prompt
+            return json.dumps(
+                {"what_happened": "assistant misunderstood", "why_it_happened": "KB gap",
+                 "how_to_avoid": "add KB article", "suggestions": "improve routing"}
+            )
+        return json.dumps(
+            [{"conversation_id": conv.id, "category": "negative_feedback", "confidence": "high",
+              "recommended_next_step": "fix", "rationale": "r"}]
+        )
+
+    rec = gemini.analyze_batch_vertex([conv], "run", "t", generate=gen)[0]
+    assert rec.deep is not None
+    assert rec.deep.what_happened == "assistant misunderstood"
+    assert rec.deep.why_it_happened == "KB gap"  # root cause kept separate from what happened
+    assert rec.deep.how_to_avoid and rec.deep.suggestions
 
 
 def test_pii_is_scrubbed_before_reaching_the_llm():

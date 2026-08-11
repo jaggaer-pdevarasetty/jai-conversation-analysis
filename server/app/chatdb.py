@@ -46,6 +46,28 @@ def load_one_from_chatdb(conversation_id: str, engine=None) -> Conversation | No
     return convs[0] if convs else None
 
 
+def eligible_conversation_ids(limit: int | None = None, engine=None) -> list[str]:
+    """IDs of conversations eligible for analysis: not deleted and inactive >= 5 minutes.
+    (Eligibility is enforced in the DB so we don't pull transcripts just to skip them.)"""
+    sch = safe_schema()
+    eng = engine or _engine()
+    try:
+        with eng.connect() as c:
+            sql = (
+                f"select id from \"{sch}\".conversations "
+                f"where is_deleted = false "
+                f"and (last_message_at is null or last_message_at < now() - interval '5 minutes') "
+                f"order by last_message_at desc nulls last"
+            )
+            if limit:
+                sql += " limit :lim"
+            rows = c.execute(text(sql), {"lim": limit} if limit else {}).all()
+        return [str(r[0]) for r in rows]
+    finally:
+        if engine is None:
+            eng.dispose()
+
+
 def load_from_chatdb(
     limit: int | None = None, engine=None, ids: list[str] | None = None
 ) -> list[Conversation]:

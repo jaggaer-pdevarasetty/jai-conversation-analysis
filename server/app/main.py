@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -40,11 +40,27 @@ def _load_source() -> list[Conversation]:
         return []
 
 
-# Common store (memory by default; Postgres when STORE_BACKEND=sql). Seeded by one analysis
-# run over the configured source (fixtures | langsmith). In production a scheduler triggers
-# run_analysis every 4h; classification uses Vertex when configured, else deterministic rules.
+# Common store (memory by default; Postgres when STORE_BACKEND=sql).
 store = make_store()
-latest_run = run_analysis(store, _load_source(), analyze_batch=make_batch_analyzer())
+
+# Analysis queue: bounded, deduped, worker-pooled (never re-runs/loops). Used by lazy analyse
+# and (at startup, chatdb) to give FULL coverage in the background without blocking boot.
+from .queue import AnalysisQueue  # noqa: E402
+
+analysis_queue = AnalysisQueue(store, make_batch_analyzer())
+
+if settings.source == "chatdb":
+    analysis_queue.start()
+    try:
+        from .chatdb import eligible_conversation_ids
+
+        analysis_queue.enqueue(eligible_conversation_ids())  # cover everything over time
+    except Exception as exc:  # noqa: BLE001 - chat DB may be unreachable; UI still works
+        print(f"[warn] startup enqueue failed: {type(exc).__name__}", flush=True)
+    latest_run = run_analysis(store, [], analyze_batch=make_batch_analyzer())  # empty summary
+else:
+    # fixtures / langsmith: seed synchronously so the pooled list is populated immediately.
+    latest_run = run_analysis(store, _load_source(), analyze_batch=make_batch_analyzer())
 
 
 def require_reviewer(x_roles: str | None = Header(default=None)) -> None:
@@ -124,6 +140,7 @@ def _conversation_detail(conversation_id: str) -> dict | None:
             "analyzer_version": record.analyzer_version,
             "analyzed_at": record.analyzed_at,
         },
+        "deep": asdict(record.deep) if record.deep else None,
         "metrics": _metrics(record),
         "messages": [
             {
@@ -146,6 +163,31 @@ def get_conversation(conversation_id: str):
     if payload is None:
         return problem_response(404, "Not found", f"No analysis for conversation {conversation_id}")
     return payload
+
+
+@api.get("/feedback")
+def feedback_conversations():
+    """Conversations where the user gave EXPLICIT thumbs feedback — with the deep analysis
+    (what happened / why / how to avoid / suggestions) and the user's remark."""
+    items = []
+    for record in store.list():
+        conv = store.get_conversation(record.conversation_id)
+        if conv is None or conv.feedback.rating is None:
+            continue
+        items.append(
+            {
+                "conversation_id": record.conversation_id,
+                "category": record.category,
+                "confidence": record.confidence,
+                "rating": conv.feedback.rating,
+                "comment": conv.feedback.comment,
+                "recommended_next_step": record.recommended_next_step,
+                "deep": asdict(record.deep) if record.deep else None,
+            }
+        )
+    # thumbs-down first (most actionable), then the rest
+    items.sort(key=lambda it: (it["rating"] is not False))
+    return {"items": items, "total": len(items)}
 
 
 @api.post("/conversations/{conversation_id}/analyze")
@@ -236,49 +278,8 @@ def dashboard_users(tenant_id: str):
         return problem_response(503, "Chat DB unavailable", type(exc).__name__)
 
 
-def _lazy_analyze(conversation_ids: list[str]) -> None:
-    """Background: analyse a user's un-analysed conversations in CHUNKS, clearing 'analysing'
-    per conversation as each chunk finishes so the UI updates incrementally."""
-    import uuid
-    from datetime import datetime, timezone
-
-    from .chatdb import load_from_chatdb
-    from .deidentify import deidentify
-
-    now = datetime.now(timezone.utc).isoformat()
-    analyzer = make_batch_analyzer()
-    try:
-        convs = load_from_chatdb(ids=conversation_ids)
-    except Exception as exc:  # noqa: BLE001 - never crash a background task
-        print(f"[warn] lazy analyse load failed: {type(exc).__name__}", flush=True)
-        for cid in conversation_ids:
-            store.clear_analyzing(cid)
-        return
-
-    size = max(1, settings.batch_size)
-    for i in range(0, len(convs), size):
-        chunk = convs[i : i + size]
-        try:
-            records = {r.conversation_id: r for r in analyzer(chunk, f"lazy_{uuid.uuid4().hex[:8]}", now)}
-        except Exception:  # noqa: BLE001
-            records = {}
-        for conv in chunk:
-            rec = records.get(conv.id)
-            if rec is not None:
-                store.upsert(rec, deidentify(conv))
-                store.record_analysis(conv.id, now)
-            else:
-                store.mark_failed(conv.id)
-            store.clear_analyzing(conv.id)  # incremental: this one is done now
-
-    loaded = {c.id for c in convs}
-    for cid in conversation_ids:  # ids that no longer exist → don't leave them 'analysing'
-        if cid not in loaded:
-            store.clear_analyzing(cid)
-
-
 @api.get("/dashboard/tenants/{tenant_id}/users/{user_id}/conversations")
-def dashboard_user_conversations(tenant_id: str, user_id: str, background_tasks: BackgroundTasks):
+def dashboard_user_conversations(tenant_id: str, user_id: str):
     from . import dashboard
 
     try:
@@ -286,15 +287,20 @@ def dashboard_user_conversations(tenant_id: str, user_id: str, background_tasks:
     except Exception as exc:  # noqa: BLE001
         return problem_response(503, "Chat DB unavailable", type(exc).__name__)
 
-    # Lazy analyse: kick off un-analysed ones in the background and mark them 'analysing'.
-    pending = [it["conversation_id"] for it in items if it["status"] == "pending"]
-    if settings.lazy_analyze and pending:
-        store.mark_analyzing(pending)
-        background_tasks.add_task(_lazy_analyze, pending)
+    # Lazy analyse: enqueue un-analysed ones (deduped, no re-run) and mark them 'analysing'.
+    if settings.lazy_analyze:
+        pending = [it["conversation_id"] for it in items if it["status"] == "pending"]
+        accepted = set(analysis_queue.enqueue(pending)) if pending else set()
         for it in items:
-            if it["conversation_id"] in pending:
+            if it["conversation_id"] in accepted:
                 it["status"] = "analysing"
     return {"items": items}
+
+
+@api.get("/queue")
+def queue_stats():
+    """Queue health: depth, in-flight, dead-letter, capacity, workers."""
+    return analysis_queue.stats()
 
 
 @api.post("/runs")

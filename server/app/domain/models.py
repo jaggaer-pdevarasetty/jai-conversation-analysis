@@ -97,6 +97,18 @@ class Override:
     at: str
 
 
+@dataclass
+class DeepAnalysis:
+    """Extra, deeper analysis kept ONLY for conversations with explicit user feedback.
+    `what_happened` and `why_it_happened` are deliberately separate (fact vs root cause)."""
+
+    what_happened: str = ""
+    why_it_happened: str = ""
+    how_to_avoid: str = ""
+    suggestions: str = ""
+    user_remark: str = ""  # the user's own feedback comment, verbatim (de-identified)
+
+
 # ── Common side (pooled area; conversation_id only, de-identified) ───────────
 @dataclass
 class AnalysisRecord:
@@ -112,6 +124,7 @@ class AnalysisRecord:
     analyzer_version: str
     analyzed_at: str
     override: Optional[Override] = None
+    deep: Optional[DeepAnalysis] = None  # populated only when the conversation has feedback
 
     @property
     def category(self) -> Category:
