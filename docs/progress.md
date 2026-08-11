@@ -67,13 +67,20 @@ non-English handling. Working on branch **`feature/J1-93353-conversation-analysi
   TLS never disabled.
 - Verified end-to-end: rules fallback → 6 analysed, 6 rows persisted in Postgres. **39 pytest green.**
 
+## Done — execution increment 4 (Vertex live + eval harness)
+- **Vertex confirmed WORKING** in `us-central1` via gcloud **ADC** (project
+  `gcp-jai-platform-dev`) — 6/6 fixtures classified by `vertex:gemini-2.5-flash`, persisted
+  to Postgres. Enable in-app by adding project+location+`STORE_BACKEND=sql` to `.env` + restart.
+- **Classifier prompt tuned** — explicit thumbs feedback now wins → positive/negative_feedback.
+- **Eval harness** (ADR-0011): agreement % + confusion matrix + **resolved-mislabel hard
+  gate**; `python -m app.eval`. Rules baseline 100%; **live Vertex eval 100%** on the fixture
+  gold set. Tests green: **server 42 pytest**.
+
 ## Next
-1. **Enable real Vertex classification** — needs `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`,
-   `GOOGLE_APPLICATION_CREDENTIALS` (SA w/ Vertex AI User).
-2. **LangSmith-as-source ingestion** → real conversations (runs in GCP for real; Zscaler CA locally).
+1. **LangSmith-as-source ingestion** → real conversations (mock-tested here; real from GCP).
+2. Grow the **gold set** to 100–200 real labelled conversations for a real ≥85% measurement.
 3. Client **detail view** (transcript + tokens/TTFT) + override control UI.
-4. **Eval harness** (≥85% agreement; resolved-mislabel hard gate).
-5. CI: add a Postgres service so the SQL store tests run (not skip).
+4. CI: add a Postgres service so the SQL store tests run (not skip).
 
 ## Blockers / needs
 - **Credentials:** LangSmith read key; chat DB read-only connection details; Gemini access.

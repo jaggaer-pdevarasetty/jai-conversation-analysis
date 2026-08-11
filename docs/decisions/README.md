@@ -15,8 +15,9 @@ Decision, Consequences, and (optionally) Alternatives considered.
 - ADR-0006 — Stack: Next.js client + FastAPI server (mirrors jai-agentos-chat)
 - ADR-0007 — De-identification boundary + conversation-ID-only attribution
 - ADR-0008 — Scheduled batch cadence + eligibility + retry
-- ADR-0009 — Persistent common store (SQLAlchemy: SQLite default, Postgres via Docker)
-- ADR-0010 — Gemini classifier with deterministic fallback
+- ADR-0009 — Persistent common store on PostgreSQL (container; SQLite dropped)
+- ADR-0010 — Gemini classification via Vertex AI (enterprise) + rules fallback
+- ADR-0011 — Evaluation harness + accuracy hard gate (≥85%, resolved-mislabel critical)
 
 ## Rule
 When you make a non-trivial choice during a task, add or update an ADR in the same change,
