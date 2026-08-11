@@ -165,6 +165,18 @@ non-English handling. Working on branch **`feature/J1-93353-conversation-analysi
 - Green: **client 13 jest + typecheck + lint + production build; server 58 pytest, 3 skipped**.
   Browser-verified queue and tenant pagination with no runtime errors or horizontal overflow.
 
+## Done — execution increment 13 (feedback analytics frontend)
+- Rebuilt `/feedback` as a responsive analytics table with explicit-rating totals, sentiment and
+  deep-analysis coverage, negative-priority alerting, search/category/sentiment/sort filters,
+  root-cause previews, source context, telemetry, and local pagination.
+- Added `/feedback/[id]`: full ordered Markdown transcript, prominent user remark, category and
+  confidence, root-cause sections, remediation guidance, source metadata, and complete telemetry.
+- Exact `feedback_message_id` is used automatically when available; the current API lacks it, so the
+  final assistant response is labelled **Feedback context** with an explicit non-exact notice.
+- Fixed Overview recent-row overlap: UUID/date are separate block lines, narrow content uses two
+  columns, and category/recommendation appear only when the post-sidebar width is sufficient.
+- Frontend only: **14 jest + typecheck + lint + production build**. No server-owned files changed.
+
 ## Next
 1. Repopulate `analysis` from `chatdb` via Vertex + restart backend (approved) → UI shows real data.
 2. Fix `.env`: `CHAT_DB_URL` db = `jai_agentos_uit`, `CHAT_DB_SCHEMA=jai_agentos_schema_uit`, `SOURCE=chatdb`.

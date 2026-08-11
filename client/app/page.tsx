@@ -250,13 +250,13 @@ export default function OverviewPage() {
         <Divider />
         {recent.length ? recent.map((item, index) => (
           <Box key={item.conversation_id}>
-            <Box sx={{ px: { xs: 2.25, md: 3 }, py: 1.8, display: "grid", gridTemplateColumns: { xs: "1fr auto", md: "minmax(240px, .8fr) 180px minmax(280px, 1.25fr) auto" }, gap: 2, alignItems: "center" }}>
-              <Box sx={{ minWidth: 0 }}>
-                <Typography component={Link} href={`/conversations/${item.conversation_id}`} variant="body2" sx={{ color: "text.primary", fontWeight: 750, textDecoration: "none", overflowWrap: "anywhere", "&:hover": { color: "primary.main" } }}>{item.conversation_id}</Typography>
-                <Typography variant="caption" color="text.secondary">{formatDate(item.analyzed_at)}</Typography>
+            <Box sx={{ px: { xs: 2.25, md: 3 }, py: 1.8, display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr) auto", lg: "minmax(0, 1.1fr) 170px minmax(0, 1.25fr) auto" }, gap: 2, alignItems: "center" }}>
+              <Box sx={{ minWidth: 0, overflow: "hidden" }}>
+                <Typography component={Link} href={`/conversations/${item.conversation_id}`} title={item.conversation_id} variant="body2" sx={{ display: "block", color: "text.primary", fontWeight: 750, textDecoration: "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", "&:hover": { color: "primary.main" } }}>{item.conversation_id}</Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.25, whiteSpace: "nowrap" }}>{formatDate(item.analyzed_at)}</Typography>
               </Box>
-              <Box sx={{ display: { xs: "none", md: "block" } }}><CategoryChip category={item.category} /></Box>
-              <Typography variant="body2" color="text.secondary" sx={{ display: { xs: "none", md: "block" }, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.recommended_next_step}</Typography>
+              <Box sx={{ display: { xs: "none", lg: "block" }, minWidth: 0 }}><CategoryChip category={item.category} /></Box>
+              <Typography variant="body2" color="text.secondary" sx={{ display: { xs: "none", lg: "block" }, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.recommended_next_step}</Typography>
               <Button component={Link} href={`/conversations/${item.conversation_id}`} size="small" aria-label={`Review conversation ${item.conversation_id}`}>Review</Button>
             </Box>
             {index < recent.length - 1 && <Divider />}

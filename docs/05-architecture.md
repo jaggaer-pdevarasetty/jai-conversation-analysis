@@ -82,11 +82,13 @@ Reviewers may override the assigned category; the override is stored as an audit
 - `app/page.tsx` — operational Overview combining aggregate tenant coverage, analysis outcomes, telemetry, run status, and recent records.
 - `app/tenants/` — authorised tenant → users → conversations administration workflow.
 - `app/conversations/` — separate pooled review queue and de-identified conversation-review routes.
+- `app/feedback/` — explicit-feedback analytics table and dedicated full-conversation review route.
 - `src/services/dashboardApi.ts` — typed tenant/user/conversation dashboard fetch layer.
 - `src/services/analysisApi.ts` — typed pooled list/detail/run fetch layer.
 - `src/components/ReviewerTable.tsx` — server-paginated, searchable, filterable pooled review queue.
 - `src/components/AnalysisQueuePanel.tsx` — polling view of real queued/in-flight conversation IDs.
 - `src/components/ConversationDetail.tsx` — transcript + evidence + metrics + feedback + override audit.
+- `src/components/FeedbackConversationDetail.tsx` — feedback-first transcript, context highlighting, deep analysis, and telemetry.
 - `src/components/MarkdownContent.tsx` — safe React renderer for the Markdown subset used in untrusted chat content.
 - `src/components/AppShell.tsx` / `src/theme.ts` — responsive navigation, privacy-scope labels, shared MUI design system.
 - `src/config.ts` — API base URL.

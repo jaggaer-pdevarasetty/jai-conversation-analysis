@@ -22,7 +22,7 @@ const record: Detail = {
     { id: "m1", role: "user", content: "How do I reset my password?", sequence_num: 1, model: null, created_at: "" },
     { id: "m2", role: "assistant", content: "Go to **Settings**:\n\n1. Open Security.\n2. Choose Password.", sequence_num: 2, model: "gemini", created_at: "" },
   ],
-  feedback: { rating: null, comment: null },
+  feedback: { rating: null, comment: null, message_id: null },
 };
 
 const overrideMock = jest.fn(async (_id: string, _category: string, _actor: string) => undefined);
