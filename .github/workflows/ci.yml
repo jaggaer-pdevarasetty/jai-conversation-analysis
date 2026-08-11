@@ -54,3 +54,10 @@ jobs:
       - uses: gitleaks/gitleaks-action@v2
         env:
           GITLEAKS_CONFIG: .gitleaks.toml
+
+  # ADR-0001 guard: fail the build if a write against a non-own store creeps in.
+  read-only-posture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/check_read_only_posture.sh

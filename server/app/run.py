@@ -22,13 +22,24 @@ INACTIVITY = timedelta(minutes=5)
 Classifier = Callable[[Conversation, str, str], AnalysisRecord]
 
 
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
 def _parse(ts: str) -> datetime:
-    return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    # Normalise to an aware UTC datetime (LangSmith timestamps are often tz-naive).
+    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 def last_activity(conv: Conversation) -> datetime:
-    stamps = [m.created_at for m in conv.messages if m.created_at] or [conv.created_at]
-    return max(_parse(s) for s in stamps)
+    stamps: list[datetime] = []
+    for raw in [m.created_at for m in conv.messages] + [conv.created_at]:
+        if raw:
+            try:
+                stamps.append(_parse(raw))
+            except ValueError:
+                pass  # ignore unparseable timestamps
+    return max(stamps) if stamps else _EPOCH  # no timestamp → treat as old → eligible
 
 
 def is_eligible(conv: Conversation, now: datetime) -> bool:

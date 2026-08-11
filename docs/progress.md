@@ -87,12 +87,24 @@ non-English handling. Working on branch **`feature/J1-93353-conversation-analysi
   Fix locally by setting `REQUESTS_CA_BUNDLE`=Zscaler root CA (TLS never disabled), or run
   in GCP. No code blocker.
 
+## Done — execution increment 6 (real LangSmith data, live-confirmed)
+- **Zscaler TLS solved** via `truststore` (OS trust store) — no TLS disabling. `app/http.py`
+  prefers an explicit CA file, else OS store, else certifi.
+- **LangSmith live-confirmed**: real projects are `prelogin_uit | uit_us | uit_eu | uit_uk`
+  (the `.env` had a wrong `jai-orchestrator`). End-to-end with `SOURCE=langsmith`
+  project=prelogin_uit → **12 real conversations analysed → 12 rows persisted in Postgres**,
+  0 failures.
+- **Bug fixed** (found via real data): LangSmith timestamps are tz-naive → normalise to UTC
+  in `run.py` (eligibility no longer crashes). Regression test added. **46 pytest green.**
+
 ## Next
-1. **Enable real data:** set `SOURCE=langsmith` + `STORE_BACKEND=sql` (+ `REQUESTS_CA_BUNDLE`
-   if local) → live-test ingestion + validate the run→message mapping against a real sample.
-2. Grow the **gold set** to 100–200 real labelled conversations for a real ≥85% measurement.
-3. Client **detail view** (transcript + tokens/TTFT) + override control UI.
-4. CI: add a Postgres service so the SQL store tests run (not skip).
+1. **Pick the real project** in `.env` (`LANGSMITH_PROJECT`) — all 4 have data; which holds
+   the JAI Assist conversations to analyse? Remove the `REQUESTS_CA_BUNDLE` placeholder line.
+2. **Validate/tune the run→message mapping** — prelogin_uit's 12 all landed `failed_to_resolve`
+   under the rules; confirm against real transcripts + enable Vertex (add project+location).
+3. Grow the **gold set** to 100–200 real labelled conversations for a real ≥85% measurement.
+4. Client **detail view** (transcript + tokens/TTFT) + override control UI.
+5. CI: add a Postgres service so the SQL store tests run (not skip).
 
 ## Blockers / needs
 - **Credentials:** LangSmith read key; chat DB read-only connection details; Gemini access.

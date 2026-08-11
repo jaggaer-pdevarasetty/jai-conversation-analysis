@@ -70,12 +70,24 @@ def _vertex_generate(prompt: str) -> str:
     return resp.text or ""
 
 
+_RATIONALE_MAX_LEN = 500
+
+
 def _parse(raw: str) -> tuple[str | None, str]:
+    """Never trust the reply's shape: it is model output derived from untrusted
+    transcript data. A non-object, non-string, or oversized field must fall back safely
+    rather than raise or flow through unbounded."""
     try:
         parsed = json.loads(raw)
-        return parsed.get("category"), parsed.get("rationale", "")
     except (TypeError, ValueError):
         return None, ""
+    if not isinstance(parsed, dict):
+        return None, ""
+    category = parsed.get("category")
+    category = category if isinstance(category, str) else None
+    rationale = parsed.get("rationale", "")
+    rationale = rationale if isinstance(rationale, str) else ""
+    return category, rationale[:_RATIONALE_MAX_LEN]
 
 
 def classify_with_vertex(

@@ -24,6 +24,16 @@ def test_eligibility_requires_5min_inactivity():
     assert is_eligible(_conv_at(1), now) is False  # AC-11
 
 
+def test_eligibility_handles_timezone_naive_timestamps():
+    # LangSmith timestamps are tz-naive; must not crash mixing with aware now.
+    conv = Conversation(
+        id="naive", tenant_id="t", title=None, created_at="2020-01-01T00:00:00",
+        feedback=Feedback(),
+        messages=[Message(id="m", role="user", content="hi", sequence_num=1, created_at="2020-01-01T00:00:00")],
+    )
+    assert is_eligible(conv, datetime.now(timezone.utc)) is True
+
+
 def test_run_analyses_all_eligible_fixtures():
     store = CommonStore()
     summary = run_analysis(store, CONVERSATIONS, now=datetime.now(timezone.utc))

@@ -15,8 +15,11 @@ signals and can reconstruct conversations for analysis now.
   objects. Field mapping (inputs/outputs → messages) is **best-effort and isolated** in
   helpers; it must be validated against one real sample. Tokens/latency/`conversation_id`
   are the reliable parts (ADR-0003).
-- Uses the env-aware HTTP client (`app/http.py`) → works behind **Zscaler** by setting
-  `REQUESTS_CA_BUNDLE` (Zscaler root CA) + optional `HTTPS_PROXY`; **TLS is never disabled**.
+- Uses the env-aware HTTP client (`app/http.py`) → works behind **Zscaler** via the **OS
+  trust store** (`truststore`, macOS/Windows) which already trusts the Zscaler root; an
+  explicit `REQUESTS_CA_BUNDLE` is honoured when set (Linux/GCP). **TLS is never disabled.**
+  (OpenSSL rejects the Zscaler root's non-critical Basic Constraints, so the OS store is the
+  robust path locally.)
 - `tenant_id` is carried only on the SOURCE side and dropped by de-identification (ADR-0007)
   before the common store.
 - Startup never crashes on a source error (logs + empty), so a bad network doesn't wedge the app.
