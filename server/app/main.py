@@ -400,6 +400,22 @@ def queue_stats(
     return analysis_queue.stats(limit=limit, offset=offset)
 
 
+@api.get("/stats")
+def operational_stats():
+    """Operational metrics: throughput, queue health, LLM vs rules, override + token totals."""
+    from . import reporting
+
+    return reporting.operational_stats(store, analysis_queue, latest_run)
+
+
+@api.get("/report")
+def product_report():
+    """Business report (J1-93353): category mix, high-frequency issues, new use-cases."""
+    from . import reporting
+
+    return reporting.product_report(store)
+
+
 @api.post("/runs")
 def trigger_run():
     """Trigger a run (scheduler / reviewer). Re-analyses eligible, not-yet-analysed convs."""

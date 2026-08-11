@@ -88,6 +88,9 @@ def run_analysis(
                 store.upsert(record, deidentify(conv))
                 analysed += 1
 
+    from .obs import log_event
+
+    log_event("run_completed", run_id=run_id, analysed=analysed, failed=failed, skipped=skipped)
     return RunSummary(
         run_id=run_id,
         started_at=started,
