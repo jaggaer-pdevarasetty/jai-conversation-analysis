@@ -74,17 +74,19 @@ export function AppShell({ children }: { children: ReactNode }) {
   const isActive = (href: string) => (href === "/" ? overviewView : pathname.startsWith(href));
   const pageTitle = overviewView
     ? "Overview"
-    : pathname.startsWith("/feedback")
-      ? "User feedback"
-      : pathname.includes("/users/")
-        ? "User conversations"
-        : pathname.startsWith("/tenants/")
-          ? "Tenant users"
-          : tenantView
-            ? "Tenants"
-            : pathname.startsWith("/conversations/")
-              ? "Conversation review"
-              : "Review queue";
+    : pathname.startsWith("/feedback/")
+      ? "Feedback review"
+      : pathname === "/feedback"
+        ? "User feedback"
+        : pathname.includes("/users/")
+          ? "User conversations"
+          : pathname.startsWith("/tenants/")
+            ? "Tenant users"
+            : tenantView
+              ? "Tenants"
+              : pathname.startsWith("/conversations/")
+                ? "Conversation review"
+                : "Review queue";
 
   useEffect(() => setMobileOpen(false), [pathname]);
 

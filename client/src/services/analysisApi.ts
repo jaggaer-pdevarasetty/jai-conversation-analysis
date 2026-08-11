@@ -95,8 +95,21 @@ export interface DeepAnalysis {
   user_remark: string;
 }
 
+export interface ConversationSource {
+  tenant_id?: string | null;
+  tenant_name?: string | null;
+  user_id?: string | null;
+  user_name?: string | null;
+  title?: string | null;
+  status?: string | null;
+  created_at?: string | null;
+  last_message_at?: string | null;
+  message_count?: number | null;
+}
+
 export interface ConversationDetail {
   conversation_id: string;
+  source?: ConversationSource | null;
   analysis: {
     category: string;
     model_category: string;
@@ -113,24 +126,65 @@ export interface ConversationDetail {
   deep: DeepAnalysis | null;
   metrics: Metrics;
   messages: Message[];
-  feedback: { rating: boolean | null; comment: string | null };
+  feedback: { rating: boolean | null; comment: string | null; message_id?: string | null };
 }
 
-export interface FeedbackItem {
+export interface FeedbackItem extends ConversationSource {
   conversation_id: string;
   category: string;
+  model_category?: string;
   confidence: string;
   rating: boolean;
   comment: string | null;
+  feedback_message_id?: string | null;
   recommended_next_step: string;
+  rationale?: string;
+  why_it_happened?: string;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  analyzed_at?: string;
+  analyzer_version?: string;
   deep: DeepAnalysis | null;
 }
 
+export interface FeedbackQuery {
+  rating?: string;
+  category?: string;
+  query?: string;
+  sort?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface FeedbackListResponse {
+  items: FeedbackItem[];
+  total: number;
+  positive: number;
+  negative: number;
+  limit?: number;
+  offset?: number;
+}
+
 /** Conversations with explicit thumbs feedback + their deep analysis (feedback matters most). */
-export async function fetchFeedback(): Promise<{ items: FeedbackItem[]; total: number }> {
-  const res = await fetch(`${API_BASE}/api/analysis/feedback`);
+export async function fetchFeedback(params: FeedbackQuery = {}): Promise<FeedbackListResponse> {
+  const url = new URL(`${API_BASE}/api/analysis/feedback`);
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== "") url.searchParams.set(key, String(value));
+  });
+  const res = await fetch(url.toString());
   if (!res.ok) throw new Error(`Analysis API responded ${res.status}`);
-  return (await res.json()) as { items: FeedbackItem[]; total: number };
+  return (await res.json()) as FeedbackListResponse;
+}
+
+export async function fetchFeedbackConversation(id: string): Promise<ConversationDetail> {
+  return fetchConversation(id);
+}
+
+export async function fetchFeedbackItem(id: string): Promise<FeedbackItem> {
+  const response = await fetchFeedback();
+  const item = response.items.find((feedback) => feedback.conversation_id === id);
+  if (!item) throw new Error(`No explicit feedback for conversation ${id}`);
+  return item;
 }
 
 export const CATEGORIES = [
