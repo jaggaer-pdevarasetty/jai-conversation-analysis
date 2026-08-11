@@ -100,20 +100,24 @@ def conversation_meta(ids: list[str]) -> dict[str, dict]:
         f'left join "{_sch()}".users u on u.user_id = conv.user_id and u.tenant_id = conv.tenant_id '
         f'where conv.id::text in :ids'
     ).bindparams(bindparam("ids", expanding=True))
+    from .privacy import apply_meta
+
     with _engine().connect() as c:
         rows = c.execute(stmt, {"ids": ids}).mappings().all()
     return {
-        str(r["id"]): {
-            "tenant_id": str(r["tenant_id"]) if r["tenant_id"] is not None else None,
-            "tenant_name": r["tenant_name"] or (f"Tenant {r['tenant_id']}" if r["tenant_id"] else None),
-            "user_id": str(r["user_id"]) if r["user_id"] is not None else None,
-            "user_name": r["user_name"] or (f"User {r['user_id']}" if r["user_id"] else None),
-            "title": r["title"],
-            "status": r["status"],
-            "created_at": str(r["created_at"]) if r["created_at"] else None,
-            "last_message_at": str(r["last_message_at"]) if r["last_message_at"] else None,
-            "message_count": r["message_count"],
-        }
+        str(r["id"]): apply_meta(
+            {
+                "tenant_id": str(r["tenant_id"]) if r["tenant_id"] is not None else None,
+                "tenant_name": r["tenant_name"] or (f"Tenant {r['tenant_id']}" if r["tenant_id"] else None),
+                "user_id": str(r["user_id"]) if r["user_id"] is not None else None,
+                "user_name": r["user_name"] or (f"User {r['user_id']}" if r["user_id"] else None),
+                "title": r["title"],
+                "status": r["status"],
+                "created_at": str(r["created_at"]) if r["created_at"] else None,
+                "last_message_at": str(r["last_message_at"]) if r["last_message_at"] else None,
+                "message_count": r["message_count"],
+            }
+        )
         for r in rows
     }
 

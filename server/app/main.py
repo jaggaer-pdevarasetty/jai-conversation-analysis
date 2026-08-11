@@ -347,10 +347,22 @@ def dashboard_overview():
         return problem_response(503, "Chat DB unavailable", type(exc).__name__)
 
 
+def _pooled_block():
+    from .privacy import is_pooled
+
+    if is_pooled():
+        return problem_response(
+            403, "Pooled privacy mode", "Per-tenant drill-down is disabled in pooled mode (AC-10)."
+        )
+    return None
+
+
 @api.get("/dashboard/tenants")
 def dashboard_tenants():
     from . import dashboard
 
+    if (blocked := _pooled_block()) is not None:
+        return blocked
     try:
         return {"items": dashboard.tenants()}
     except Exception as exc:  # noqa: BLE001
@@ -361,6 +373,8 @@ def dashboard_tenants():
 def dashboard_users(tenant_id: str):
     from . import dashboard
 
+    if (blocked := _pooled_block()) is not None:
+        return blocked
     try:
         return {"items": dashboard.users(tenant_id)}
     except Exception as exc:  # noqa: BLE001
@@ -376,6 +390,8 @@ def dashboard_user_conversations(
 ):
     from . import dashboard
 
+    if (blocked := _pooled_block()) is not None:
+        return blocked
     try:
         items, total = dashboard.user_conversations(store, tenant_id, user_id, limit, offset)
     except Exception as exc:  # noqa: BLE001

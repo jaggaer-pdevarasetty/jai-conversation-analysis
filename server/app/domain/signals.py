@@ -54,7 +54,11 @@ def feedback_signal(fb: Feedback) -> str | None:
 
 _PII = [
     (re.compile(r"[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}", re.IGNORECASE), "[email]"),
-    (re.compile(r"\+?\d[\d ().-]{7,}\d"), "[phone]"),
+    (re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b"), "[iban]"),
+    (re.compile(r"\b(?:\d[ -]?){13,19}\b"), "[card]"),  # 13-19 digit card-like sequences
+    (re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b"), "[ip]"),
+    (re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), "[ssn]"),
+    (re.compile(r"\+?\d[\d ().-]{7,}\d"), "[phone]"),  # keep last: broadest digit run
 ]
 
 

@@ -56,6 +56,9 @@ class Settings:
     lazy_analyze: bool = os.getenv("LAZY_ANALYZE", "true").lower() == "true"
     # Scheduled sweep cadence in hours (enqueues eligible convos). 0 disables (AC-1: every 4h).
     schedule_hours: float = float(os.getenv("SCHEDULE_HOURS", "4"))
+    # Privacy mode: "admin" (show tenant/user — authorised internal view) or "pooled"
+    # (AC-10/ADR-0007: no tenant/user identity; pseudonyms only; drill-down disabled).
+    privacy_mode: str = os.getenv("PRIVACY_MODE", "admin")
 
     # Common store: "memory" (default, for tests/no-DB) or "sql" (Postgres — ADR-0009).
     # SQLite is intentionally NOT supported for storing data; use Postgres (podman/Docker).
