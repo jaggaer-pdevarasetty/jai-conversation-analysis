@@ -12,12 +12,10 @@ import {
   Button,
   Chip,
   CircularProgress,
-  FormControl,
   InputAdornment,
-  InputLabel,
   Link as MuiLink,
+  MenuItem,
   Paper,
-  Select,
   Skeleton,
   Stack,
   Table,
@@ -175,19 +173,16 @@ export default function UserConversationsPage() {
           onChange={(event) => setSearch(event.target.value)}
           InputProps={{ startAdornment: <InputAdornment position="start"><SearchRoundedIcon fontSize="small" /></InputAdornment> }}
         />
-        <FormControl size="small">
-          <InputLabel htmlFor="outcome-filter">Outcome or status</InputLabel>
-          <Select native label="Outcome or status" value={outcome} onChange={(event) => setOutcome(String(event.target.value))} inputProps={{ id: "outcome-filter" }}>
-            <option value="">All outcomes</option>
-            <option value="analysing">Analysing</option>
-            <option value="pending">Queued</option>
-            <option value="resolved">Resolved</option>
-            <option value="failed_to_resolve">Failed to resolve</option>
-            <option value="positive_feedback">Positive feedback</option>
-            <option value="negative_feedback">Negative feedback</option>
-            <option value="out_of_scope">Out of scope</option>
-          </Select>
-        </FormControl>
+        <TextField fullWidth select size="small" label="Outcome or status" value={outcome} onChange={(event) => setOutcome(event.target.value)}>
+          <MenuItem value="">All outcomes</MenuItem>
+          <MenuItem value="analysing">Analysing</MenuItem>
+          <MenuItem value="pending">Queued</MenuItem>
+          <MenuItem value="resolved">Resolved</MenuItem>
+          <MenuItem value="failed_to_resolve">Failed to resolve</MenuItem>
+          <MenuItem value="positive_feedback">Positive feedback</MenuItem>
+          <MenuItem value="negative_feedback">Negative feedback</MenuItem>
+          <MenuItem value="out_of_scope">Out of scope</MenuItem>
+        </TextField>
       </Paper>
 
       <TableContainer component={Paper}>

@@ -40,6 +40,28 @@ def compute_metrics(conv: Conversation) -> Metrics:
     )
 
 
+def _readable_rationale(signals: Signals) -> str:
+    """Plain-English rationale (never the raw Signals repr — that must not reach the UI)."""
+    reasons = []
+    if signals.feedback == "positive":
+        reasons.append("the user gave positive feedback")
+    if signals.feedback == "negative":
+        reasons.append("the user gave negative feedback")
+    if signals.repeated_prompts:
+        reasons.append("the user repeated the same question")
+    if signals.abandoned:
+        reasons.append("the user left without a final answer")
+    if signals.error:
+        reasons.append("an error occurred during the chat")
+    if signals.out_of_scope_intent:
+        reasons.append("the request was outside JAI's scope")
+    if signals.frustrated:
+        reasons.append("the user appeared frustrated")
+    if not reasons:
+        return "No problem signals were detected, so the chat is treated as resolved."
+    return "Assigned because " + ", ".join(reasons) + "."
+
+
 def analyze(conv: Conversation, run_id: str, now: str | None = None) -> AnalysisRecord:
     """
     In production the LLM makes the final category decision with these signals as hints;
@@ -52,7 +74,7 @@ def analyze(conv: Conversation, run_id: str, now: str | None = None) -> Analysis
         model_category=category,
         recommended_next_step=recommended_next_step(category),
         confidence="high" if signals.feedback else "medium",
-        rationale=f"Category derived from signals: {signals}.",
+        rationale=_readable_rationale(signals),
         signals=signals,
         metrics=compute_metrics(conv),
         status="analysed",

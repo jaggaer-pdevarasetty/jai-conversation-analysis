@@ -1,6 +1,7 @@
 "use client";
 
 import { Box, Chip, Stack, Typography } from "@mui/material";
+import { AnalysisQueuePanel } from "../../src/components/AnalysisQueuePanel";
 import { ReviewerTable } from "../../src/components/ReviewerTable";
 
 export default function AllConversationsPage() {
@@ -14,8 +15,9 @@ export default function AllConversationsPage() {
             Start with unresolved and low-confidence conversations, inspect the evidence, and override the category when human judgment differs.
           </Typography>
         </Box>
-        <Chip label="Up to 200 conversations per view" variant="outlined" sx={{ bgcolor: "#FFFFFF" }} />
+        <Chip label="Server-paginated results" variant="outlined" sx={{ bgcolor: "#FFFFFF" }} />
       </Box>
+      <AnalysisQueuePanel />
       <ReviewerTable />
     </Stack>
   );

@@ -29,6 +29,11 @@ def test_enqueue_dedupes_and_skips_already_analysed(monkeypatch):
     accepted2 = q.enqueue(IDS)  # same ids again → all deduped
     assert set(accepted1) == set(IDS)
     assert accepted2 == []  # no re-enqueue → cannot loop
+    stats = q.stats()
+    assert stats["queued"] == len(IDS)
+    assert stats["in_flight"] == 0
+    assert {item["conversation_id"] for item in stats["items"]} == set(IDS)
+    assert all(item["status"] == "queued" for item in stats["items"])
 
 
 def test_worker_processes_then_never_reruns(monkeypatch):

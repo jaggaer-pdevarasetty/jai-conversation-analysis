@@ -31,6 +31,7 @@ import {
   overrideCategory,
 } from "../services/analysisApi";
 import { CATEGORY_META, CategoryChip, categoryLabel } from "./CategoryChip";
+import { MarkdownContent } from "./MarkdownContent";
 
 /** AC-7: missing telemetry shows "unavailable", never 0. */
 function metric(value: number | null): string {
@@ -155,7 +156,7 @@ export function ConversationDetail({ id, initial }: { id: string; initial?: Deta
 
         <Box sx={{ mt: 2.5, p: 2.25, borderRadius: 2.5, bgcolor: "#FFF6F1", borderLeft: "4px solid", borderColor: "primary.main" }}>
           <Typography variant="overline" color="primary.dark">Recommended next step</Typography>
-          <Typography sx={{ mt: 0.35, fontWeight: 700 }}>{a.recommended_next_step}</Typography>
+          <Box sx={{ mt: 0.35, fontWeight: 700 }}><MarkdownContent>{a.recommended_next_step}</MarkdownContent></Box>
         </Box>
       </Paper>
 
@@ -184,7 +185,7 @@ export function ConversationDetail({ id, initial }: { id: string; initial?: Deta
                       {message.model && <Typography variant="caption" color="text.secondary">· {message.model}</Typography>}
                     </Box>
                     <Box sx={{ mt: 0.75, px: 2, py: 1.5, borderRadius: 2.5, bgcolor: assistant ? "#FFFFFF" : "#F7F8FA", border: "1px solid", borderColor: "divider" }}>
-                      <Typography sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{message.content || "No message content"}</Typography>
+                      <MarkdownContent>{message.content || "No message content"}</MarkdownContent>
                     </Box>
                   </Box>
                 </Box>
@@ -202,7 +203,7 @@ export function ConversationDetail({ id, initial }: { id: string; initial?: Deta
               <Typography variant="h3">Review evidence</Typography>
             </Box>
             <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 2 }}>Why this category was assigned</Typography>
-            <Typography variant="body2" sx={{ mt: 0.6 }}>{a.rationale || "No model rationale was provided."}</Typography>
+            <Box sx={{ mt: 0.6, fontSize: 14 }}><MarkdownContent>{a.rationale || "No model rationale was provided."}</MarkdownContent></Box>
             <Divider sx={{ my: 2 }} />
             <Typography variant="caption" color="text.secondary">Detected signals</Typography>
             <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>

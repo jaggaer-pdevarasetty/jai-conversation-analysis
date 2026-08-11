@@ -38,6 +38,36 @@ export interface ListResponse {
   offset: number;
 }
 
+export interface AnalysisQuery {
+  category?: string;
+  query?: string;
+  confidence?: string;
+  review_state?: string;
+  sort?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface QueueItem {
+  conversation_id: string;
+  status: "queued" | "analysing" | "retrying";
+  attempt: number;
+  queued_at: string;
+}
+
+export interface QueueStats {
+  queued: number;
+  in_flight: number;
+  in_flight_or_queued: number;
+  dead_letter: number;
+  capacity: number;
+  workers: number;
+  started: boolean;
+  items: QueueItem[];
+  limit: number;
+  offset: number;
+}
+
 export interface RunSummary {
   run_id: string;
   started_at: string;
@@ -57,6 +87,14 @@ export interface Message {
   created_at: string;
 }
 
+export interface DeepAnalysis {
+  what_happened: string;
+  why_it_happened: string;
+  how_to_avoid: string;
+  suggestions: string;
+  user_remark: string;
+}
+
 export interface ConversationDetail {
   conversation_id: string;
   analysis: {
@@ -72,9 +110,27 @@ export interface ConversationDetail {
     analyzed_at: string;
     analyzer_version?: string;
   };
+  deep: DeepAnalysis | null;
   metrics: Metrics;
   messages: Message[];
   feedback: { rating: boolean | null; comment: string | null };
+}
+
+export interface FeedbackItem {
+  conversation_id: string;
+  category: string;
+  confidence: string;
+  rating: boolean;
+  comment: string | null;
+  recommended_next_step: string;
+  deep: DeepAnalysis | null;
+}
+
+/** Conversations with explicit thumbs feedback + their deep analysis (feedback matters most). */
+export async function fetchFeedback(): Promise<{ items: FeedbackItem[]; total: number }> {
+  const res = await fetch(`${API_BASE}/api/analysis/feedback`);
+  if (!res.ok) throw new Error(`Analysis API responded ${res.status}`);
+  return (await res.json()) as { items: FeedbackItem[]; total: number };
 }
 
 export const CATEGORIES = [
@@ -95,16 +151,18 @@ async function getJson<T>(path: string): Promise<T> {
 }
 
 /** Fetch analysed conversations from the FastAPI server (optionally filtered). */
-export async function fetchAnalysis(category?: string): Promise<ListResponse> {
+export async function fetchAnalysis(params: AnalysisQuery = {}): Promise<ListResponse> {
   const url = new URL(`${API_BASE}/api/analysis/conversations`);
-  url.searchParams.set("limit", "200");
-  if (category) url.searchParams.set("category", category);
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== "") url.searchParams.set(key, String(value));
+  });
   const res = await fetch(url.toString());
   if (!res.ok) throw new Error(`Analysis API responded ${res.status}`);
   return (await res.json()) as ListResponse;
 }
 
 export const fetchLatestRun = () => getJson<RunSummary>("/api/analysis/runs/latest");
+export const fetchQueue = (limit = 25, offset = 0) => getJson<QueueStats>(`/api/analysis/queue?limit=${limit}&offset=${offset}`);
 
 /** Fetch the full de-identified record for one conversation (FR-4). */
 export async function fetchConversation(id: string): Promise<ConversationDetail> {

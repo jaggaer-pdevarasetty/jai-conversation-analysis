@@ -54,6 +54,8 @@ class Settings:
     max_analyses_per_day: int = int(os.getenv("MAX_ANALYSES_PER_DAY", "3"))
     # Lazy analyse: auto-analyse a user's un-analysed conversations when a reviewer opens them.
     lazy_analyze: bool = os.getenv("LAZY_ANALYZE", "true").lower() == "true"
+    # Scheduled sweep cadence in hours (enqueues eligible convos). 0 disables (AC-1: every 4h).
+    schedule_hours: float = float(os.getenv("SCHEDULE_HOURS", "4"))
 
     # Common store: "memory" (default, for tests/no-DB) or "sql" (Postgres — ADR-0009).
     # SQLite is intentionally NOT supported for storing data; use Postgres (podman/Docker).

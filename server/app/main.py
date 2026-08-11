@@ -49,14 +49,24 @@ from .queue import AnalysisQueue  # noqa: E402
 
 analysis_queue = AnalysisQueue(store, make_batch_analyzer())
 
+def _sweep() -> None:
+    """Enqueue every eligible, not-yet-analysed conversation (deduped by the queue)."""
+    from .chatdb import eligible_conversation_ids
+
+    analysis_queue.enqueue(eligible_conversation_ids())
+
+
+scheduler = None
 if settings.source == "chatdb":
     analysis_queue.start()
     try:
-        from .chatdb import eligible_conversation_ids
-
-        analysis_queue.enqueue(eligible_conversation_ids())  # cover everything over time
+        _sweep()  # initial full-coverage sweep at boot (non-blocking)
     except Exception as exc:  # noqa: BLE001 - chat DB may be unreachable; UI still works
-        print(f"[warn] startup enqueue failed: {type(exc).__name__}", flush=True)
+        print(f"[warn] startup sweep failed: {type(exc).__name__}", flush=True)
+    from .scheduler import Scheduler  # every SCHEDULE_HOURS: pick up new/eligible convos (AC-1)
+
+    scheduler = Scheduler(settings.schedule_hours * 3600, _sweep)
+    scheduler.start()
     latest_run = run_analysis(store, [], analyze_batch=make_batch_analyzer())  # empty summary
 else:
     # fixtures / langsmith: seed synchronously so the pooled list is populated immediately.
@@ -102,18 +112,65 @@ api = APIRouter(prefix="/api/analysis", dependencies=[Depends(require_reviewer)]
 @api.get("/conversations")
 def list_conversations(
     category: str | None = Query(default=None),
+    query: str | None = Query(default=None, max_length=200),
+    confidence: str | None = Query(default=None),
+    review_state: str | None = Query(default=None),
+    sort: str = Query(default="attention"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ):
     if category is not None and category not in CATEGORIES:
         return problem_response(400, "Invalid category", f"Unknown category: {category}")
+    if confidence is not None and confidence not in {"high", "medium", "low"}:
+        return problem_response(400, "Invalid confidence", f"Unknown confidence: {confidence}")
+    if review_state is not None and review_state not in {"attention", "feedback", "overridden", "missing_telemetry"}:
+        return problem_response(400, "Invalid review state", f"Unknown review state: {review_state}")
+    if sort not in {"attention", "newest", "confidence", "slowest", "tokens"}:
+        return problem_response(400, "Invalid sort", f"Unknown sort: {sort}")
+
     records = store.list(category=category)  # type: ignore[arg-type]
-    page = records[offset : offset + limit]
-    items = [_list_item(r, store.get_conversation(r.conversation_id)) for r in page]
+    items = [_list_item(record, store.get_conversation(record.conversation_id)) for record in records]
+    text_query = (query or "").strip().lower()
+    if text_query:
+        items = [
+            item for item in items
+            if text_query in item["conversation_id"].lower()
+            or text_query in item["recommended_next_step"].lower()
+        ]
+    if confidence:
+        items = [item for item in items if item["confidence"] == confidence]
+    if review_state == "attention":
+        items = [item for item in items if item["category"] in {"failed_to_resolve", "negative_feedback", "out_of_scope"}]
+    elif review_state == "feedback":
+        items = [item for item in items if item["has_feedback"]]
+    elif review_state == "overridden":
+        items = [item for item in items if item["overridden"]]
+    elif review_state == "missing_telemetry":
+        items = [
+            item for item in items
+            if item["metrics"]["ttft_ms"] is None
+            or item["metrics"]["input_tokens"] is None
+            or item["metrics"]["output_tokens"] is None
+        ]
+
+    priority = {"negative_feedback": 0, "failed_to_resolve": 1, "out_of_scope": 2, "positive_feedback": 3, "resolved": 4}
+    confidence_order = {"low": 0, "medium": 1, "high": 2}
+    if sort == "newest":
+        items.sort(key=lambda item: item.get("analyzed_at") or "", reverse=True)
+    elif sort == "confidence":
+        items.sort(key=lambda item: confidence_order.get(item["confidence"], 3))
+    elif sort == "slowest":
+        items.sort(key=lambda item: item["metrics"]["ttft_ms"] or -1, reverse=True)
+    elif sort == "tokens":
+        items.sort(key=lambda item: (item["metrics"]["input_tokens"] or 0) + (item["metrics"]["output_tokens"] or 0), reverse=True)
+    else:
+        items.sort(key=lambda item: priority.get(item["category"], 9))
+
+    total = len(items)
     return {
-        "items": items,
+        "items": items[offset : offset + limit],
         "counts": store.count_by_category(),
-        "total": len(records),
+        "total": total,
         "unanalysed": store.unanalysed_count(),
         "limit": limit,
         "offset": offset,
@@ -298,9 +355,12 @@ def dashboard_user_conversations(tenant_id: str, user_id: str):
 
 
 @api.get("/queue")
-def queue_stats():
+def queue_stats(
+    limit: int = Query(default=25, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+):
     """Queue health: depth, in-flight, dead-letter, capacity, workers."""
-    return analysis_queue.stats()
+    return analysis_queue.stats(limit=limit, offset=offset)
 
 
 @api.post("/runs")

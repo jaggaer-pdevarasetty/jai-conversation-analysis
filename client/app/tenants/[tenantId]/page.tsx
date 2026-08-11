@@ -13,12 +13,10 @@ import {
   Breadcrumbs,
   Button,
   Chip,
-  FormControl,
   InputAdornment,
-  InputLabel,
   Link as MuiLink,
+  MenuItem,
   Paper,
-  Select,
   Skeleton,
   Stack,
   TextField,
@@ -102,13 +100,10 @@ export default function TenantUsersPage() {
           onChange={(event) => setSearch(event.target.value)}
           InputProps={{ startAdornment: <InputAdornment position="start"><SearchRoundedIcon fontSize="small" /></InputAdornment> }}
         />
-        <FormControl size="small">
-          <InputLabel htmlFor="role-filter">Role</InputLabel>
-          <Select native label="Role" value={role} onChange={(event) => setRole(String(event.target.value))} inputProps={{ id: "role-filter" }}>
-            <option value="">All roles</option>
-            {roles.map((value) => <option key={value} value={value}>{value}</option>)}
-          </Select>
-        </FormControl>
+        <TextField fullWidth select size="small" label="Role" value={role} onChange={(event) => setRole(event.target.value)}>
+          <MenuItem value="">All roles</MenuItem>
+          {roles.map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
+        </TextField>
       </Paper>
 
       <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2 }}>

@@ -10,13 +10,10 @@ import {
   Box,
   Button,
   Chip,
-  FormControl,
   InputAdornment,
-  InputLabel,
   Link as MuiLink,
   MenuItem,
   Paper,
-  Select,
   Skeleton,
   Stack,
   Table,
@@ -24,13 +21,14 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   TextField,
   Typography,
 } from "@mui/material";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { fetchAnalysis, type ListItem, type ListResponse } from "../services/analysisApi";
+import { useEffect, useState } from "react";
+import { fetchAnalysis, type ListItem } from "../services/analysisApi";
 import { CategoryChip } from "./CategoryChip";
 
 const CATEGORY_OPTIONS: Array<{ value: string; label: string }> = [
@@ -65,26 +63,49 @@ function confidenceColor(confidence: string): "success" | "warning" | "default" 
   return "default";
 }
 
-export function ReviewerTable({ initial }: { initial?: ListResponse }) {
-  const [items, setItems] = useState<ListItem[]>(initial?.items ?? []);
-  const [unanalysed, setUnanalysed] = useState<number>(initial?.unanalysed ?? 0);
+export function ReviewerTable() {
+  const [items, setItems] = useState<ListItem[]>([]);
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [total, setTotal] = useState(0);
+  const [unanalysed, setUnanalysed] = useState(0);
   const [category, setCategory] = useState("");
   const [confidence, setConfidence] = useState("");
+  const [reviewState, setReviewState] = useState("");
   const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
   const [sort, setSort] = useState("attention");
-  const [loading, setLoading] = useState(!initial);
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
 
   useEffect(() => {
-    if (initial) return;
+    const timer = setTimeout(() => {
+      setPage(0);
+      setQuery(search.trim());
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
     let active = true;
     setLoading(true);
     setError(null);
-    fetchAnalysis(category)
+    fetchAnalysis({
+      category,
+      query,
+      confidence,
+      review_state: reviewState,
+      sort,
+      limit: rowsPerPage,
+      offset: page * rowsPerPage,
+    })
       .then((res) => {
         if (!active) return;
         setItems(res.items);
+        setCounts(res.counts);
+        setTotal(res.total);
         setUnanalysed(res.unanalysed);
       })
       .catch(() => {
@@ -96,38 +117,21 @@ export function ReviewerTable({ initial }: { initial?: ListResponse }) {
     return () => {
       active = false;
     };
-  }, [category, initial, reload]);
+  }, [category, confidence, page, query, reload, reviewState, rowsPerPage, sort]);
 
-  const visibleItems = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    const filtered = items.filter(
-      (item) =>
-        (!confidence || item.confidence === confidence) &&
-        (!query ||
-          item.conversation_id.toLowerCase().includes(query) ||
-          item.recommended_next_step.toLowerCase().includes(query)),
-    );
-    const priority: Record<string, number> = {
-      negative_feedback: 0,
-      failed_to_resolve: 1,
-      out_of_scope: 2,
-      positive_feedback: 3,
-      resolved: 4,
-    };
-    return [...filtered].sort((a, b) => {
-      if (sort === "newest") return (b.analyzed_at ?? "").localeCompare(a.analyzed_at ?? "");
-      if (sort === "confidence") return ({ low: 0, medium: 1, high: 2 }[a.confidence] ?? 3) - ({ low: 0, medium: 1, high: 2 }[b.confidence] ?? 3);
-      return (priority[a.category] ?? 9) - (priority[b.category] ?? 9);
-    });
-  }, [confidence, items, search, sort]);
-
-  const needsAttention = items.filter((item) => ["failed_to_resolve", "negative_feedback", "out_of_scope"].includes(item.category)).length;
-  const hasFilters = Boolean(category || confidence || search);
+  const needsAttention = (counts.failed_to_resolve ?? 0) + (counts.negative_feedback ?? 0) + (counts.out_of_scope ?? 0);
+  const hasFilters = Boolean(category || confidence || reviewState || search || sort !== "attention");
+  const firstResult = total ? page * rowsPerPage + 1 : 0;
+  const lastResult = Math.min((page + 1) * rowsPerPage, total);
 
   function resetFilters() {
     setCategory("");
     setConfidence("");
+    setReviewState("");
     setSearch("");
+    setQuery("");
+    setSort("attention");
+    setPage(0);
   }
 
   return (
@@ -141,21 +145,22 @@ export function ReviewerTable({ initial }: { initial?: ListResponse }) {
 
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(3, 1fr)" }, gap: 1.5 }}>
         <Paper sx={{ p: 2 }}>
-          <Typography variant="caption" color="text.secondary">Loaded conversations</Typography>
-          <Typography variant="h3" sx={{ mt: 0.4 }}>{items.length.toLocaleString()}</Typography>
+          <Typography variant="caption" color="text.secondary">Matching conversations</Typography>
+          <Typography variant="h3" sx={{ mt: 0.4 }}>{total.toLocaleString()}</Typography>
         </Paper>
         <Paper sx={{ p: 2 }}>
           <Typography variant="caption" color="text.secondary">Needs attention</Typography>
           <Typography variant="h3" sx={{ mt: 0.4, color: "error.main" }}>{needsAttention.toLocaleString()}</Typography>
         </Paper>
         <Paper sx={{ p: 2 }}>
-          <Typography variant="caption" color="text.secondary">Human overrides</Typography>
+          <Typography variant="caption" color="text.secondary">Overrides on this page</Typography>
           <Typography variant="h3" sx={{ mt: 0.4 }}>{items.filter((item) => item.overridden).length.toLocaleString()}</Typography>
         </Paper>
       </Box>
 
-      <Paper sx={{ p: 2, display: "grid", gridTemplateColumns: { xs: "1fr", md: "minmax(240px, 1fr) repeat(3, minmax(170px, auto))" }, gap: 1.5, alignItems: "center" }}>
+      <Paper sx={{ p: 2, display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))", lg: "repeat(3, minmax(0, 1fr))" }, gap: 1.5, alignItems: "center" }}>
         <TextField
+          fullWidth
           size="small"
           label="Search conversations"
           placeholder="ID or recommended action"
@@ -163,35 +168,29 @@ export function ReviewerTable({ initial }: { initial?: ListResponse }) {
           onChange={(event) => setSearch(event.target.value)}
           InputProps={{ startAdornment: <InputAdornment position="start"><SearchRoundedIcon fontSize="small" /></InputAdornment> }}
         />
-        <FormControl size="small">
-          <InputLabel htmlFor="category-filter">Filter by category</InputLabel>
-          <Select
-            native
-            value={category}
-            label="Filter by category"
-            onChange={(event) => setCategory(String(event.target.value))}
-            inputProps={{ id: "category-filter" }}
-          >
-            {CATEGORY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </Select>
-        </FormControl>
-        <FormControl size="small">
-          <InputLabel htmlFor="confidence-filter">Confidence</InputLabel>
-          <Select native value={confidence} label="Confidence" onChange={(event) => setConfidence(String(event.target.value))} inputProps={{ id: "confidence-filter" }}>
-            <option value="">All confidence</option>
-            <option value="low">Low confidence</option>
-            <option value="medium">Medium confidence</option>
-            <option value="high">High confidence</option>
-          </Select>
-        </FormControl>
-        <FormControl size="small">
-          <InputLabel htmlFor="sort-order">Sort</InputLabel>
-          <Select native value={sort} label="Sort" onChange={(event) => setSort(String(event.target.value))} inputProps={{ id: "sort-order" }}>
-            <option value="attention">Attention first</option>
-            <option value="newest">Newest analysis</option>
-            <option value="confidence">Lowest confidence</option>
-          </Select>
-        </FormControl>
+        <TextField fullWidth select size="small" label="Filter by category" value={category} onChange={(event) => { setCategory(event.target.value); setPage(0); }}>
+          {CATEGORY_OPTIONS.map((option) => <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>)}
+        </TextField>
+        <TextField fullWidth select size="small" label="Confidence" value={confidence} onChange={(event) => { setConfidence(event.target.value); setPage(0); }}>
+          <MenuItem value="">All confidence</MenuItem>
+          <MenuItem value="low">Low confidence</MenuItem>
+          <MenuItem value="medium">Medium confidence</MenuItem>
+          <MenuItem value="high">High confidence</MenuItem>
+        </TextField>
+        <TextField fullWidth select size="small" label="Review state" value={reviewState} onChange={(event) => { setReviewState(event.target.value); setPage(0); }}>
+          <MenuItem value="">All conversations</MenuItem>
+          <MenuItem value="attention">Needs attention</MenuItem>
+          <MenuItem value="feedback">Has feedback</MenuItem>
+          <MenuItem value="overridden">Human override</MenuItem>
+          <MenuItem value="missing_telemetry">Missing telemetry</MenuItem>
+        </TextField>
+        <TextField fullWidth select size="small" label="Sort" value={sort} onChange={(event) => { setSort(event.target.value); setPage(0); }}>
+          <MenuItem value="attention">Attention first</MenuItem>
+          <MenuItem value="newest">Newest analysis</MenuItem>
+          <MenuItem value="confidence">Lowest confidence</MenuItem>
+          <MenuItem value="slowest">Slowest response</MenuItem>
+          <MenuItem value="tokens">Highest token use</MenuItem>
+        </TextField>
       </Paper>
 
       {error ? (
@@ -204,7 +203,7 @@ export function ReviewerTable({ initial }: { initial?: ListResponse }) {
           <Box sx={{ px: 2.5, py: 2, display: "flex", alignItems: "center", gap: 1.25, borderBottom: "1px solid", borderColor: "divider" }}>
             <TuneRoundedIcon sx={{ color: "text.secondary", fontSize: 20 }} />
             <Typography variant="body2" sx={{ fontWeight: 750 }}>
-              {loading ? "Loading conversations" : `${visibleItems.length.toLocaleString()} ${visibleItems.length === 1 ? "conversation" : "conversations"}`}
+              {loading ? "Loading conversations" : total ? `Showing ${firstResult.toLocaleString()}–${lastResult.toLocaleString()} of ${total.toLocaleString()}` : "No conversations"}
             </Typography>
             {hasFilters && <Button size="small" onClick={resetFilters} sx={{ ml: "auto" }}>Clear filters</Button>}
           </Box>
@@ -217,7 +216,7 @@ export function ReviewerTable({ initial }: { initial?: ListResponse }) {
                 <TableCell>Confidence</TableCell>
                 <TableCell sx={{ display: { xs: "none", lg: "table-cell" } }}>Performance</TableCell>
                 <TableCell sx={{ display: { xs: "none", xl: "table-cell" } }}>Feedback</TableCell>
-                <TableCell align="right"><span className="sr-only">Open</span></TableCell>
+                <TableCell align="right">Open</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -225,7 +224,7 @@ export function ReviewerTable({ initial }: { initial?: ListResponse }) {
                 <TableRow key={row}>
                   {[1, 2, 3, 4, 5, 6, 7].map((cell) => <TableCell key={cell}><Skeleton /></TableCell>)}
                 </TableRow>
-              )) : visibleItems.length ? visibleItems.map((item) => (
+              )) : items.length ? items.map((item) => (
                 <TableRow key={item.conversation_id} hover sx={{ "&:hover": { bgcolor: "#FCFCFD" } }}>
                   <TableCell sx={{ width: 255 }}>
                     <MuiLink component={Link} href={`/conversations/${item.conversation_id}`} underline="hover" sx={{ display: "block", color: "text.primary", fontWeight: 750, fontSize: 13, overflowWrap: "anywhere" }}>
@@ -260,7 +259,7 @@ export function ReviewerTable({ initial }: { initial?: ListResponse }) {
                     <Box sx={{ py: 7, textAlign: "center" }}>
                       <SearchRoundedIcon sx={{ fontSize: 34, color: "text.disabled" }} />
                       <Typography variant="h3" sx={{ mt: 1 }}>No conversations match</Typography>
-                      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>Try a different ID, action, category, or confidence level.</Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>Try a different ID, action, category, confidence, or review state.</Typography>
                       <Button sx={{ mt: 2 }} onClick={resetFilters}>Clear filters</Button>
                     </Box>
                   </TableCell>
@@ -268,6 +267,16 @@ export function ReviewerTable({ initial }: { initial?: ListResponse }) {
               )}
             </TableBody>
           </Table>
+          <TablePagination
+            component="div"
+            count={total}
+            page={page}
+            rowsPerPage={rowsPerPage}
+            rowsPerPageOptions={[10, 25, 50, 100]}
+            onPageChange={(_, nextPage) => setPage(nextPage)}
+            onRowsPerPageChange={(event) => { setRowsPerPage(Number(event.target.value)); setPage(0); }}
+            labelRowsPerPage="Conversations per page"
+          />
         </TableContainer>
       )}
     </Stack>

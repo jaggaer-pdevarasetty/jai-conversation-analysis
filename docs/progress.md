@@ -138,6 +138,24 @@ non-English handling. Working on branch **`feature/J1-93353-conversation-analysi
 - Green: **client 10 jest + typecheck + lint + clean production build; server 49 pytest, 3 skipped**.
   Browser-checked tenant directory and users at desktop/mobile widths with no runtime errors or overflow.
 
+## Done — execution increment 10 (Overview restored by product clarification)
+- Restored `/` as **Overview** and added Overview + Tenants + Review queue to primary navigation.
+- Overview combines aggregate tenant/user/source counts with analysis coverage, outcome distribution,
+  telemetry completeness, retry health, latest-run details, review signals, and recent records.
+- Tenant administration remains unchanged at `/tenants`; shell labels distinguish operational,
+  authorised-admin, and de-identified scopes.
+- Green after an isolated cache rebuild: **client 10 jest + typecheck + lint + production build;
+  server 49 pytest, 3 skipped**. Overview browser-check passed at desktop/mobile widths.
+
+## Done — execution increment 11 (Markdown + filter/UI fixes)
+- Chat messages, recommendations, and rationale now render safe styled Markdown (bold/italic,
+  headings, lists, links, code, quotes) as React nodes; raw HTML and unsafe links are not executed.
+- Replaced every overlapping native select with responsive MUI selects across queue and tenant pages.
+- Added queue review-state filters (attention, feedback, overrides, missing telemetry) and latency/token
+  sorting; verified zero filter overlap at 1024px and no page overflow at 375px.
+- Green: **client 11 jest + typecheck + lint + production build; server 52 pytest, 3 skipped**.
+  Real transcript check: 14 strong elements, 2 rendered lists, no raw `**`, no runtime errors.
+
 ## Next
 1. Repopulate `analysis` from `chatdb` via Vertex + restart backend (approved) → UI shows real data.
 2. Fix `.env`: `CHAT_DB_URL` db = `jai_agentos_uit`, `CHAT_DB_SCHEMA=jai_agentos_schema_uit`, `SOURCE=chatdb`.

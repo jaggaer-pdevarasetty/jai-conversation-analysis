@@ -1,43 +1,52 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ListResponse } from "../services/analysisApi";
+import type { AnalysisQuery, ListItem, ListResponse } from "../services/analysisApi";
 import { ReviewerTable } from "./ReviewerTable";
 
-function response(category?: string): ListResponse {
-  const all = [
-    {
-      conversation_id: "11111111-1111-4111-8111-111111111111",
-      category: "resolved",
-      recommended_next_step: "No action.",
-      confidence: "medium",
-      status: "analysed",
-      overridden: false,
-      has_feedback: false,
-      metrics: { ttft_ms: 340, input_tokens: 130, output_tokens: 48, prompt_tokens: 120 },
-    },
-    {
-      conversation_id: "66666666-6666-4666-8666-666666666666",
-      category: "resolved",
-      recommended_next_step: "No action.",
-      confidence: "medium",
-      status: "analysed",
-      overridden: false,
-      has_feedback: false,
-      // AC-7: missing telemetry
-      metrics: { ttft_ms: null, input_tokens: null, output_tokens: null, prompt_tokens: null },
-    },
-  ];
-  const items = category ? all.filter((i) => i.category === category) : all;
-  return { items, counts: {}, total: items.length, unanalysed: 2, limit: 50, offset: 0 };
+function response(params: AnalysisQuery = {}): ListResponse {
+  const all: ListItem[] = Array.from({ length: 30 }, (_, index) => ({
+    conversation_id: index === 0
+      ? "11111111-1111-4111-8111-111111111111"
+      : index === 1
+        ? "66666666-6666-4666-8666-666666666666"
+        : `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+    category: "resolved",
+    recommended_next_step: "No action.",
+    confidence: "medium",
+    status: "analysed",
+    overridden: false,
+    has_feedback: false,
+    metrics: index === 1
+      ? { ttft_ms: null, input_tokens: null, output_tokens: null, prompt_tokens: null }
+      : { ttft_ms: 340, input_tokens: 130, output_tokens: 48, prompt_tokens: 120 },
+  }));
+  let items = params.category ? all.filter((item) => item.category === params.category) : all;
+  if (params.query) items = items.filter((item) => item.conversation_id.includes(params.query!) || item.recommended_next_step.includes(params.query!));
+  if (params.review_state === "missing_telemetry") items = items.filter((item) => item.metrics.ttft_ms === null);
+  const total = items.length;
+  const offset = params.offset ?? 0;
+  const limit = params.limit ?? 25;
+  return {
+    items: items.slice(offset, offset + limit),
+    counts: { resolved: all.length },
+    total,
+    unanalysed: 2,
+    limit,
+    offset,
+  };
 }
 
 jest.mock("../services/analysisApi", () => ({
-  fetchAnalysis: jest.fn(async (category?: string) => response(category)),
+  fetchAnalysis: jest.fn(async (params?: AnalysisQuery) => response(params)),
 }));
 
 import { fetchAnalysis } from "../services/analysisApi";
 
+const fetchAnalysisMock = fetchAnalysis as jest.MockedFunction<typeof fetchAnalysis>;
+
 describe("ReviewerTable", () => {
+  beforeEach(() => fetchAnalysisMock.mockClear());
+
   it("renders a searchable review queue by conversation ID (no tenant column)", async () => {
     render(<ReviewerTable />);
     expect(await screen.findByRole("table", { name: "Analysed conversations" })).toBeInTheDocument();
@@ -57,17 +66,37 @@ describe("ReviewerTable", () => {
     expect(await screen.findByText(/not yet analysed/)).toBeInTheDocument();
   });
 
-  it("filters by category via the labelled control", async () => {
+  it("filters by category through the server query", async () => {
     render(<ReviewerTable />);
     await screen.findByText("11111111-1111-4111-8111-111111111111");
-    await userEvent.selectOptions(screen.getByLabelText("Filter by category"), "resolved");
-    await waitFor(() => expect(fetchAnalysis).toHaveBeenLastCalledWith("resolved"));
+    await userEvent.click(screen.getByLabelText("Filter by category"));
+    await userEvent.click(await screen.findByRole("option", { name: "JAI resolved user query" }));
+    await waitFor(() => expect(fetchAnalysisMock).toHaveBeenLastCalledWith(expect.objectContaining({ category: "resolved", offset: 0 })));
   });
 
-  it("searches the loaded queue by conversation ID or recommended action", async () => {
+  it("searches the server by conversation ID or recommended action", async () => {
     render(<ReviewerTable />);
     await screen.findByText("11111111-1111-4111-8111-111111111111");
     await userEvent.type(screen.getByLabelText("Search conversations"), "no matching conversation");
-    expect(screen.getByText("No conversations match")).toBeInTheDocument();
+    expect(await screen.findByText("No conversations match")).toBeInTheDocument();
+    expect(fetchAnalysisMock).toHaveBeenLastCalledWith(expect.objectContaining({ query: "no matching conversation" }));
+  });
+
+  it("filters conversations that have missing telemetry", async () => {
+    render(<ReviewerTable />);
+    await screen.findByText("11111111-1111-4111-8111-111111111111");
+    await userEvent.click(screen.getByLabelText("Review state"));
+    await userEvent.click(await screen.findByRole("option", { name: "Missing telemetry" }));
+    await waitFor(() => expect(fetchAnalysisMock).toHaveBeenLastCalledWith(expect.objectContaining({ review_state: "missing_telemetry" })));
+    expect(screen.queryByText("11111111-1111-4111-8111-111111111111")).not.toBeInTheDocument();
+    expect(screen.getByText("66666666-6666-4666-8666-666666666666")).toBeInTheDocument();
+  });
+
+  it("requests the next page from the server", async () => {
+    render(<ReviewerTable />);
+    await screen.findByText("Showing 1–25 of 30");
+    await userEvent.click(screen.getByRole("button", { name: "Go to next page" }));
+    await waitFor(() => expect(fetchAnalysisMock).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 25, offset: 25 })));
+    expect(await screen.findByText("Showing 26–30 of 30")).toBeInTheDocument();
   });
 });

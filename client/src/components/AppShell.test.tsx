@@ -2,14 +2,15 @@ import { render, screen } from "@testing-library/react";
 import { AppShell } from "./AppShell";
 
 jest.mock("next/navigation", () => ({
-  usePathname: () => "/tenants",
+  usePathname: () => "/",
 }));
 
 describe("AppShell", () => {
-  it("routes the primary workspace through tenants without a health overview", () => {
-    render(<AppShell><div>Tenant content</div></AppShell>);
+  it("routes to Overview, Tenants, and the pooled review queue", () => {
+    render(<AppShell><div>Overview content</div></AppShell>);
+    expect(screen.getByRole("link", { name: "Overview" })).toHaveAttribute("href", "/");
     expect(screen.getByRole("link", { name: "Tenants" })).toHaveAttribute("href", "/tenants");
-    expect(screen.queryByText("Health overview")).not.toBeInTheDocument();
-    expect(screen.getByText("Authorised admin view")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Review queue" })).toHaveAttribute("href", "/conversations");
+    expect(screen.getByText("Operational overview")).toBeInTheDocument();
   });
 });

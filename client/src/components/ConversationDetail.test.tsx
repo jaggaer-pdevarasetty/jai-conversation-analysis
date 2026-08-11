@@ -16,10 +16,11 @@ const record: Detail = {
     analyzed_at: "2026-08-11T00:00:00Z",
     analyzer_version: "vertex:gemini-2.5-flash",
   },
+  deep: null,
   metrics: { ttft_ms: 11440, input_tokens: 35293, output_tokens: 6186, prompt_tokens: 35293 },
   messages: [
     { id: "m1", role: "user", content: "How do I reset my password?", sequence_num: 1, model: null, created_at: "" },
-    { id: "m2", role: "assistant", content: "Go to Settings → Security.", sequence_num: 2, model: "gemini", created_at: "" },
+    { id: "m2", role: "assistant", content: "Go to **Settings**:\n\n1. Open Security.\n2. Choose Password.", sequence_num: 2, model: "gemini", created_at: "" },
   ],
   feedback: { rating: null, comment: null },
 };
@@ -40,6 +41,9 @@ describe("ConversationDetail", () => {
     expect(screen.getByLabelText("Time to first token")).toHaveTextContent("11.4 s");
     expect(screen.getByLabelText("Input tokens")).toHaveTextContent("35,293");
     expect(screen.getByText("The user repeated the same question.")).toBeInTheDocument();
+    expect(screen.getByText("Settings").tagName).toBe("STRONG");
+    expect(screen.getByRole("list")).toBeInTheDocument();
+    expect(screen.queryByText(/\*\*Settings\*\*/)).not.toBeInTheDocument();
   });
 
   it("submits a human override", async () => {

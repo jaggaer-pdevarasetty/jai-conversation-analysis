@@ -2,9 +2,11 @@
 
 import AdminPanelSettingsOutlinedIcon from "@mui/icons-material/AdminPanelSettingsOutlined";
 import BusinessRoundedIcon from "@mui/icons-material/BusinessRounded";
+import DashboardRoundedIcon from "@mui/icons-material/DashboardRounded";
 import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined";
 import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import MenuRoundedIcon from "@mui/icons-material/MenuRounded";
+import ThumbsUpDownOutlinedIcon from "@mui/icons-material/ThumbsUpDownOutlined";
 import {
   AppBar,
   Box,
@@ -26,13 +28,15 @@ import { useEffect, useState } from "react";
 const DRAWER_WIDTH = 264;
 
 const NAV = [
+  { href: "/", label: "Overview", icon: <DashboardRoundedIcon /> },
   { href: "/tenants", label: "Tenants", icon: <BusinessRoundedIcon /> },
+  { href: "/feedback", label: "Feedback", icon: <ThumbsUpDownOutlinedIcon /> },
   { href: "/conversations", label: "Review queue", icon: <FactCheckOutlinedIcon /> },
 ];
 
 function Logo() {
   return (
-    <Box component={Link} href="/tenants" sx={{ display: "flex", alignItems: "center", gap: 1.25, color: "inherit", textDecoration: "none" }}>
+    <Box component={Link} href="/" sx={{ display: "flex", alignItems: "center", gap: 1.25, color: "inherit", textDecoration: "none" }}>
       <Box
         sx={{
           display: "grid",
@@ -65,17 +69,22 @@ function Logo() {
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const tenantView = pathname === "/" || pathname.startsWith("/tenants");
-  const isActive = (href: string) => pathname.startsWith(href) || (href === "/tenants" && pathname === "/");
-  const pageTitle = pathname.includes("/users/")
-    ? "User conversations"
-    : pathname.startsWith("/tenants/")
-      ? "Tenant users"
-      : tenantView
-        ? "Tenants"
-        : pathname.startsWith("/conversations/")
-          ? "Conversation review"
-          : "Review queue";
+  const overviewView = pathname === "/";
+  const tenantView = pathname.startsWith("/tenants");
+  const isActive = (href: string) => (href === "/" ? overviewView : pathname.startsWith(href));
+  const pageTitle = overviewView
+    ? "Overview"
+    : pathname.startsWith("/feedback")
+      ? "User feedback"
+      : pathname.includes("/users/")
+        ? "User conversations"
+        : pathname.startsWith("/tenants/")
+          ? "Tenant users"
+          : tenantView
+            ? "Tenants"
+            : pathname.startsWith("/conversations/")
+              ? "Conversation review"
+              : "Review queue";
 
   useEffect(() => setMobileOpen(false), [pathname]);
 
@@ -152,7 +161,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <Typography sx={{ fontSize: 15, fontWeight: 720 }}>{pageTitle}</Typography>
           <Chip
             icon={tenantView ? <AdminPanelSettingsOutlinedIcon /> : <LockOutlinedIcon />}
-            label={tenantView ? "Authorised admin view" : "De-identified review"}
+            label={overviewView ? "Operational overview" : tenantView ? "Authorised admin view" : "De-identified review"}
             size="small"
             variant="outlined"
             sx={{ ml: "auto", color: "text.secondary", borderColor: "divider", bgcolor: "#FFFFFF" }}

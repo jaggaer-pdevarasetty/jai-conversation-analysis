@@ -15,6 +15,7 @@ import {
   Paper,
   Skeleton,
   Stack,
+  TablePagination,
   TextField,
   Typography,
 } from "@mui/material";
@@ -26,6 +27,8 @@ import { fetchTenants, type Tenant } from "../../src/services/dashboardApi";
 export default function TenantsPage() {
   const [tenants, setTenants] = useState<Tenant[] | null>(null);
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(12);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -37,11 +40,12 @@ export default function TenantsPage() {
     load();
   }, [load]);
 
-  const visibleTenants = useMemo(() => {
+  const filteredTenants = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return tenants ?? [];
     return (tenants ?? []).filter((tenant) => tenant.name.toLowerCase().includes(query) || tenant.tenant_id.toLowerCase().includes(query));
   }, [search, tenants]);
+  const visibleTenants = filteredTenants.slice(page * rowsPerPage, (page + 1) * rowsPerPage);
 
   if (error) {
     return (
@@ -90,7 +94,7 @@ export default function TenantsPage() {
           label="Search tenants"
           placeholder="Tenant name or ID"
           value={search}
-          onChange={(event) => setSearch(event.target.value)}
+          onChange={(event) => { setSearch(event.target.value); setPage(0); }}
           InputProps={{ startAdornment: <InputAdornment position="start"><SearchRoundedIcon fontSize="small" /></InputAdornment> }}
         />
       </Paper>

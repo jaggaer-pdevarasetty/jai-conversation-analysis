@@ -1,4 +1,4 @@
-# ADR-0014 — Tenant-first administration workspace
+# ADR-0014 — Overview with tenant administration workspace
 
 **Status:** Accepted (2026-08-11)
 
@@ -19,17 +19,19 @@ workflow.
    admin data with de-identified records and creates an overloaded screen.
 
 ## Decision
-Choose option 2. `/` redirects to `/tenants`. Primary navigation contains **Tenants** and
-**Review queue**, with no health-overview route. Tenant pages form one breadcrumbed workflow:
-**tenant directory → tenant users → user conversations → conversation review**. Each level adds
-search, useful counts, explicit loading/error/empty states, and context identifiers. Pending or
-analysing conversations remain visible but cannot open a detail record until analysis completes.
+Choose option 1 following product-owner clarification. `/` is the operational **Overview**, and
+primary navigation contains **Overview**, **Tenants**, and **Review queue**. The Overview combines
+aggregate tenant/user/source-conversation coverage with pooled analysis outcomes, telemetry health,
+latest-run status, and recent records. Tenant pages remain one breadcrumbed workflow: **tenant
+directory → tenant users → user conversations → conversation review**. Pending or analysing
+conversations remain visible but cannot open a detail record until analysis completes.
 
-The shell labels tenant routes as an **Authorised admin view** and pooled conversation routes as a
-**De-identified review** so the two privacy scopes are not presented as equivalent.
+The shell labels `/` as **Operational overview**, tenant routes as an **Authorised admin view**, and
+pooled conversation routes as a **De-identified review** so the privacy scopes remain explicit.
 
 ## Consequences
-- The default experience now depends on the read-only chat DB-backed dashboard endpoints.
+- The default Overview uses the pooled analysis API and enriches it with aggregate dashboard counts;
+  it still renders analysis data if the chat DB-backed aggregate request is unavailable.
 - Tenant/user identity is confined to the explicitly authorised admin workflow; pooled list/detail
   APIs retain the ADR-0007 conversation-ID-only contract.
 - No backend contract or dependency was added; existing lazy-analysis status is preserved.

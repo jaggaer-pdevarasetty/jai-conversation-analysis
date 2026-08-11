@@ -35,6 +35,33 @@ def test_list_filters_by_category():
         assert item["category"] == "positive_feedback"
 
 
+def test_list_paginates_and_searches_on_the_server():
+    first = client.get("/api/analysis/conversations", params={"limit": 2, "offset": 0}).json()
+    second = client.get("/api/analysis/conversations", params={"limit": 2, "offset": 2}).json()
+    assert len(first["items"]) == 2
+    assert first["total"] >= 4
+    assert {item["conversation_id"] for item in first["items"]}.isdisjoint(
+        item["conversation_id"] for item in second["items"]
+    )
+    conversation_id = first["items"][0]["conversation_id"]
+    searched = client.get("/api/analysis/conversations", params={"query": conversation_id}).json()
+    assert searched["total"] == 1
+    assert searched["items"][0]["conversation_id"] == conversation_id
+
+
+def test_list_filters_missing_telemetry():
+    body = client.get(
+        "/api/analysis/conversations", params={"review_state": "missing_telemetry"}
+    ).json()
+    assert body["items"]
+    assert all(
+        item["metrics"]["ttft_ms"] is None
+        or item["metrics"]["input_tokens"] is None
+        or item["metrics"]["output_tokens"] is None
+        for item in body["items"]
+    )
+
+
 def test_list_rejects_unknown_category_with_problem():
     res = client.get("/api/analysis/conversations", params={"category": "bogus"})
     assert res.status_code == 400
@@ -93,6 +120,16 @@ def test_latest_run_summary_exposes_counts():
     assert res.status_code == 200
     body = res.json()
     assert "analysed" in body and "unanalysed" in body
+
+
+def test_queue_summary_exposes_live_items():
+    res = client.get("/api/analysis/queue")
+    assert res.status_code == 200
+    body = res.json()
+    assert set(body) == {
+        "queued", "in_flight", "in_flight_or_queued", "dead_letter",
+        "capacity", "workers", "started", "items", "limit", "offset",
+    }
 
 
 def test_openapi_is_3_1():

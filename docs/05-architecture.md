@@ -79,13 +79,14 @@ Reviewers may override the assigned category; the override is stored as an audit
 - `langsmith.py` — read client (tokens/latency). `problem.py` — RFC 7807. `main.py` — FastAPI app + routes.
 
 ## Client modules (`client/`)
-- `app/page.tsx` — redirects the default route to the tenant directory (`/tenants`).
+- `app/page.tsx` — operational Overview combining aggregate tenant coverage, analysis outcomes, telemetry, run status, and recent records.
 - `app/tenants/` — authorised tenant → users → conversations administration workflow.
 - `app/conversations/` — separate pooled review queue and de-identified conversation-review routes.
 - `src/services/dashboardApi.ts` — typed tenant/user/conversation dashboard fetch layer.
 - `src/services/analysisApi.ts` — typed pooled list/detail/run fetch layer.
 - `src/components/ReviewerTable.tsx` — searchable, filterable, priority-sorted pooled review queue.
 - `src/components/ConversationDetail.tsx` — transcript + evidence + metrics + feedback + override audit.
+- `src/components/MarkdownContent.tsx` — safe React renderer for the Markdown subset used in untrusted chat content.
 - `src/components/AppShell.tsx` / `src/theme.ts` — responsive navigation, privacy-scope labels, shared MUI design system.
 - `src/config.ts` — API base URL.
 

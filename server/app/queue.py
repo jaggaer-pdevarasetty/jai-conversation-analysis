@@ -41,6 +41,9 @@ class AnalysisQueue:
         self._q: queue.Queue[str] = queue.Queue(maxsize=maxsize)
         self._lock = threading.Lock()
         self._queued: set[str] = set()  # in queue OR in-flight (dedup)
+        self._in_flight: set[str] = set()
+        self._retrying: set[str] = set()
+        self._queued_at: dict[str, str] = {}
         self._attempts: dict[str, int] = {}
         self._dead: set[str] = set()
         self._batch_size = batch_size or settings.batch_size
@@ -68,20 +71,34 @@ class AnalysisQueue:
                 except queue.Full:
                     break  # backpressure: stop accepting when full
                 self._queued.add(cid)
+                self._queued_at[cid] = datetime.now(timezone.utc).isoformat()
                 accepted.append(cid)
         if accepted:
             self._store.mark_analyzing(accepted)
         return accepted
 
-    def stats(self) -> dict:
+    def stats(self, limit: int = 100, offset: int = 0) -> dict:
         with self._lock:
+            items = [
+                {
+                    "conversation_id": cid,
+                    "status": "retrying" if cid in self._retrying else "analysing" if cid in self._in_flight else "queued",
+                    "attempt": self._attempts.get(cid, 0) + 1,
+                    "queued_at": self._queued_at[cid],
+                }
+                for cid in sorted(self._queued, key=lambda item: self._queued_at[item])
+            ]
             return {
                 "queued": self._q.qsize(),
+                "in_flight": len(self._in_flight),
                 "in_flight_or_queued": len(self._queued),
                 "dead_letter": len(self._dead),
                 "capacity": self._q.maxsize,
                 "workers": len(self._workers),
                 "started": self._started,
+                "items": items[offset : offset + limit],
+                "limit": limit,
+                "offset": offset,
             }
 
     # internals ---------------------------------------------------------------
@@ -97,6 +114,8 @@ class AnalysisQueue:
                     batch.append(self._q.get_nowait())
                 except queue.Empty:
                     break
+            with self._lock:
+                self._in_flight.update(batch)
             try:
                 self._process(batch)
             except Exception as exc:  # noqa: BLE001 - a worker must never die
@@ -142,6 +161,9 @@ class AnalysisQueue:
     def _finish(self, cid: str) -> None:
         with self._lock:
             self._queued.discard(cid)
+            self._in_flight.discard(cid)
+            self._retrying.discard(cid)
+            self._queued_at.pop(cid, None)
             self._attempts.pop(cid, None)
         self._store.clear_analyzing(cid)
 
@@ -150,10 +172,15 @@ class AnalysisQueue:
             with self._lock:
                 n = self._attempts.get(cid, 0) + 1
                 self._attempts[cid] = n
+                self._in_flight.discard(cid)
                 give_up = n >= self._max_attempts
+                if not give_up:
+                    self._retrying.add(cid)
             if give_up:
                 with self._lock:
                     self._queued.discard(cid)
+                    self._retrying.discard(cid)
+                    self._queued_at.pop(cid, None)
                     self._dead.add(cid)
                     self._attempts.pop(cid, None)
                 self._store.mark_failed(cid)  # visible as unanalysed; never retried again
@@ -162,5 +189,7 @@ class AnalysisQueue:
                 time.sleep(min(2 ** n, 10))  # backoff, then requeue
                 try:
                     self._q.put_nowait(cid)
+                    with self._lock:
+                        self._retrying.discard(cid)
                 except queue.Full:
                     self._finish(cid)  # can't requeue → release (a later sweep can re-add)

@@ -19,6 +19,10 @@ paths:
       summary: List analysed conversations (pooled, category counts, unanalysed count)
       parameters:
         - { name: category, in: query, required: false, schema: { $ref: '#/components/schemas/Category' } }
+        - { name: query, in: query, required: false, schema: { type: string }, description: Search conversation ID or recommended next step. }
+        - { name: confidence, in: query, required: false, schema: { $ref: '#/components/schemas/Confidence' } }
+        - { name: review_state, in: query, required: false, schema: { type: string, enum: [attention, feedback, overridden, missing_telemetry] } }
+        - { name: sort, in: query, required: false, schema: { type: string, enum: [attention, newest, confidence, slowest, tokens], default: attention } }
         - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
         - { name: offset, in: query, required: false, schema: { type: integer, minimum: 0, default: 0 } }
       responses:
@@ -59,6 +63,16 @@ paths:
       summary: Latest scheduled-run summary (analysed / failed / skipped / unanalysed)
       responses:
         '200': { description: Run summary., content: { application/json: { schema: { $ref: '#/components/schemas/RunSummary' } } } }
+  /api/analysis/queue:
+    get:
+      tags: [analysis]
+      operationId: analysisQueue
+      summary: Live queue health and queued/in-flight conversation IDs
+      parameters:
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 25 } }
+        - { name: offset, in: query, required: false, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        '200': { description: Queue status., content: { application/json: { schema: { $ref: '#/components/schemas/QueueStats' } } } }
   /api/analysis/runs:
     post:
       tags: [analysis]
@@ -180,6 +194,28 @@ components:
         failed: { type: integer }
         skipped: { type: integer }
         unanalysed: { type: integer }
+    QueueItem:
+      type: object
+      required: [conversation_id, status, attempt, queued_at]
+      properties:
+        conversation_id: { type: string }
+        status: { type: string, enum: [queued, analysing, retrying] }
+        attempt: { type: integer }
+        queued_at: { type: string, format: date-time }
+    QueueStats:
+      type: object
+      required: [queued, in_flight, in_flight_or_queued, dead_letter, capacity, workers, started, items, limit, offset]
+      properties:
+        queued: { type: integer }
+        in_flight: { type: integer }
+        in_flight_or_queued: { type: integer }
+        dead_letter: { type: integer }
+        capacity: { type: integer }
+        workers: { type: integer }
+        started: { type: boolean }
+        items: { type: array, items: { $ref: '#/components/schemas/QueueItem' } }
+        limit: { type: integer }
+        offset: { type: integer }
     Problem:
       type: object
       properties:
