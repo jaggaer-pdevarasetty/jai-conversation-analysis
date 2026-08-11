@@ -1,0 +1,28 @@
+# Local Postgres for the common analysis store (ADR-0009).
+# Docker is not required for dev (default store is SQLite). Use this to persist results
+# in Postgres locally:
+#
+#   docker compose -f docker-compose.postgres.yml up -d
+#   export STORE_BACKEND=sql
+#   export RESULTS_DB_URL="postgresql+psycopg://jai:jai@localhost:5433/analysis"
+#   (then run the server)
+services:
+  analysis-postgres:
+    image: postgres:16-alpine
+    container_name: jai-analysis-postgres
+    environment:
+      POSTGRES_USER: jai
+      POSTGRES_PASSWORD: jai
+      POSTGRES_DB: analysis
+    ports:
+      - "5433:5432" # 5433 on host to avoid clashing with a local Postgres
+    volumes:
+      - analysis_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jai -d analysis"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  analysis_pgdata:

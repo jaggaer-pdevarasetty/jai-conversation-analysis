@@ -1,0 +1,21 @@
+# Node / Next (client)
+node_modules/
+.next/
+next-env.d.ts
+
+# Python (server)
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Local
+.env
+.env.local
+coverage/
+*.log
+.DS_Store
+.graph/*.json
+
+# build info
+*.tsbuildinfo

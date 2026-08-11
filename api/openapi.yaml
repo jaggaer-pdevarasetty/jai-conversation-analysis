@@ -1,0 +1,189 @@
+openapi: 3.1.0
+info:
+  title: JAI Conversation Analysis — Reviewer API
+  version: 0.2.0
+  description: >
+    Read + override API over the pooled, de-identified common analysis area (J1-93353).
+    Attribution: conversations are keyed by conversation_id ONLY — no tenant/user is
+    exposed (ADR-0007). Reviewer RBAC. Errors use RFC 7807. FastAPI also serves the live
+    spec at /openapi.json; this file is the human-reviewed contract.
+servers:
+  - url: /
+tags:
+  - name: analysis
+paths:
+  /api/analysis/conversations:
+    get:
+      tags: [analysis]
+      operationId: listConversations
+      summary: List analysed conversations (pooled, category counts, unanalysed count)
+      parameters:
+        - { name: category, in: query, required: false, schema: { $ref: '#/components/schemas/Category' } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: offset, in: query, required: false, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        '200': { description: A page of analysed conversations., content: { application/json: { schema: { $ref: '#/components/schemas/ListResponse' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /api/analysis/conversations/{conversation_id}:
+    get:
+      tags: [analysis]
+      operationId: getConversation
+      summary: Full de-identified record for one conversation (FR-4)
+      parameters:
+        - { name: conversation_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: The full record., content: { application/json: { schema: { $ref: '#/components/schemas/ConversationDetail' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /api/analysis/conversations/{conversation_id}/override:
+    post:
+      tags: [analysis]
+      operationId: overrideCategory
+      summary: Human override of the category (audited)
+      parameters:
+        - { name: conversation_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OverrideBody' }
+      responses:
+        '200': { description: Updated record., content: { application/json: { schema: { $ref: '#/components/schemas/OverrideResult' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /api/analysis/runs/latest:
+    get:
+      tags: [analysis]
+      operationId: latestRun
+      summary: Latest scheduled-run summary (analysed / failed / skipped / unanalysed)
+      responses:
+        '200': { description: Run summary., content: { application/json: { schema: { $ref: '#/components/schemas/RunSummary' } } } }
+  /api/analysis/runs:
+    post:
+      tags: [analysis]
+      operationId: triggerRun
+      summary: Trigger an analysis run (scheduler / reviewer)
+      responses:
+        '200': { description: Run summary., content: { application/json: { schema: { $ref: '#/components/schemas/RunSummary' } } } }
+components:
+  responses:
+    Problem:
+      description: RFC 7807 problem details.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Category:
+      type: string
+      enum: [resolved, failed_to_resolve, positive_feedback, negative_feedback, out_of_scope]
+    Confidence: { type: string, enum: [high, medium, low] }
+    Status: { type: string, enum: [analysed, failed, pending] }
+    Metrics:
+      type: object
+      description: Per-conversation telemetry. null = unavailable (AC-7), never 0.
+      properties:
+        ttft_ms: { type: [integer, 'null'] }
+        input_tokens: { type: [integer, 'null'] }
+        output_tokens: { type: [integer, 'null'] }
+        prompt_tokens: { type: [integer, 'null'] }
+    Signals:
+      type: object
+      additionalProperties: true
+    Override:
+      type: object
+      properties:
+        category: { $ref: '#/components/schemas/Category' }
+        actor: { type: string }
+        at: { type: string, format: date-time }
+    ListItem:
+      type: object
+      required: [conversation_id, category, status]
+      properties:
+        conversation_id: { type: string }
+        category: { $ref: '#/components/schemas/Category' }
+        model_category: { $ref: '#/components/schemas/Category' }
+        recommended_next_step: { type: string }
+        confidence: { $ref: '#/components/schemas/Confidence' }
+        status: { $ref: '#/components/schemas/Status' }
+        overridden: { type: boolean }
+        has_feedback: { type: boolean }
+        metrics: { $ref: '#/components/schemas/Metrics' }
+        analyzed_at: { type: string, format: date-time }
+    ListResponse:
+      type: object
+      required: [items, counts, total, unanalysed]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ListItem' } }
+        counts: { type: object, additionalProperties: { type: integer } }
+        total: { type: integer }
+        unanalysed: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+    Message:
+      type: object
+      required: [id, role, sequence_num]
+      properties:
+        id: { type: string }
+        role: { type: string, enum: [system, user, assistant, live_agent] }
+        content: { type: string }
+        sequence_num: { type: integer }
+        model: { type: [string, 'null'] }
+        created_at: { type: string }
+    ConversationDetail:
+      type: object
+      required: [conversation_id, analysis, messages]
+      properties:
+        conversation_id: { type: string }
+        analysis:
+          type: object
+          properties:
+            category: { $ref: '#/components/schemas/Category' }
+            model_category: { $ref: '#/components/schemas/Category' }
+            recommended_next_step: { type: string }
+            confidence: { $ref: '#/components/schemas/Confidence' }
+            rationale: { type: string }
+            signals: { $ref: '#/components/schemas/Signals' }
+            status: { $ref: '#/components/schemas/Status' }
+            override: { anyOf: [{ $ref: '#/components/schemas/Override' }, { type: 'null' }] }
+            run_id: { type: string }
+            analyzer_version: { type: string }
+            analyzed_at: { type: string, format: date-time }
+        metrics: { $ref: '#/components/schemas/Metrics' }
+        messages: { type: array, items: { $ref: '#/components/schemas/Message' } }
+        feedback:
+          type: object
+          properties:
+            rating: { type: [boolean, 'null'] }
+            comment: { type: [string, 'null'] }
+    OverrideBody:
+      type: object
+      required: [category, actor]
+      properties:
+        category: { $ref: '#/components/schemas/Category' }
+        actor: { type: string }
+    OverrideResult:
+      type: object
+      properties:
+        conversation_id: { type: string }
+        category: { $ref: '#/components/schemas/Category' }
+        model_category: { $ref: '#/components/schemas/Category' }
+        recommended_next_step: { type: string }
+        override: { anyOf: [{ $ref: '#/components/schemas/Override' }, { type: 'null' }] }
+    RunSummary:
+      type: object
+      properties:
+        run_id: { type: string }
+        started_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+        analysed: { type: integer }
+        failed: { type: integer }
+        skipped: { type: integer }
+        unanalysed: { type: integer }
+    Problem:
+      type: object
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }

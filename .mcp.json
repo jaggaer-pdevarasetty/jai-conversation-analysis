@@ -1,0 +1,16 @@
+{
+  "_note": "MCP servers for Claude Code / Windsurf. Confirm the exact server package/command for codebase-memory in your org before relying on it. playwright-mcp uses the official @playwright/mcp package.",
+  "mcpServers": {
+    "codebase-memory": {
+      "command": "npx",
+      "args": ["-y", "codebase-memory-mcp"],
+      "env": {
+        "GRAPH_DIR": ".graph"
+      }
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest"]
+    }
+  }
+}

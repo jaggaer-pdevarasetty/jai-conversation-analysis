@@ -1,0 +1,15 @@
+title = "jai-conversation-analysis gitleaks config"
+
+# Use the full set of built-in secret-detection rules.
+[extend]
+useDefault = true
+
+# Example .env values are placeholders, not real secrets.
+[allowlist]
+description = "Ignore documented placeholders"
+paths = [
+  '''\.env\.example''',
+]
+regexes = [
+  '''\*\*\*''',
+]
