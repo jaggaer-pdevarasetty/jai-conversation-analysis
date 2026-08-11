@@ -156,6 +156,15 @@ non-English handling. Working on branch **`feature/J1-93353-conversation-analysi
 - Green: **client 11 jest + typecheck + lint + production build; server 52 pytest, 3 skipped**.
   Real transcript check: 14 strong elements, 2 rendered lists, no raw `**`, no runtime errors.
 
+## Done — execution increment 12 (pagination + live queue)
+- Pooled review queue now uses server-owned search, filters, sorting, `limit`/`offset`, filtered
+  totals, page-size controls, and correct page requests across all 299 current analyses.
+- Added a live queue panel polling every 3s; it displays real queued/analysing/retrying conversation
+  IDs, attempts, enqueue times, depth, workers, dead-letter count, idle/inactive states, and pages.
+- Added pagination to the 53-tenant directory and SQL-backed user conversation histories.
+- Green: **client 13 jest + typecheck + lint + production build; server 58 pytest, 3 skipped**.
+  Browser-verified queue and tenant pagination with no runtime errors or horizontal overflow.
+
 ## Next
 1. Repopulate `analysis` from `chatdb` via Vertex + restart backend (approved) → UI shows real data.
 2. Fix `.env`: `CHAT_DB_URL` db = `jai_agentos_uit`, `CHAT_DB_SCHEMA=jai_agentos_schema_uit`, `SOURCE=chatdb`.

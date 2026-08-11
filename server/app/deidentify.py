@@ -19,5 +19,6 @@ def deidentify(conv: Conversation) -> CommonConversation:
     feedback = Feedback(
         rating=conv.feedback.rating,
         comment=scrub_pii(conv.feedback.comment) if conv.feedback.comment else None,
+        message_id=conv.feedback.message_id,
     )
     return CommonConversation(conversation_id=conv.id, messages=messages, feedback=feedback)

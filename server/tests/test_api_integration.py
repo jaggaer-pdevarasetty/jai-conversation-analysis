@@ -132,5 +132,17 @@ def test_queue_summary_exposes_live_items():
     }
 
 
+def test_user_conversations_endpoint_paginates(monkeypatch):
+    monkeypatch.setattr(
+        "app.dashboard.user_conversations",
+        lambda store, tenant_id, user_id, limit, offset: ([], 42),
+    )
+    body = client.get(
+        "/api/analysis/dashboard/tenants/t1/users/u1/conversations",
+        params={"limit": 10, "offset": 20},
+    ).json()
+    assert body == {"items": [], "total": 42, "limit": 10, "offset": 20}
+
+
 def test_openapi_is_3_1():
     assert app.openapi()["openapi"].startswith("3.1")

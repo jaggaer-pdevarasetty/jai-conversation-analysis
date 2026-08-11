@@ -176,7 +176,7 @@ def load_from_chatdb(
             )
             fb = fb_by_msg.get(mid)
             if fb and conv_feedback.rating is None:
-                conv_feedback = Feedback(rating=fb["rating"], comment=fb["comment"])
+                conv_feedback = Feedback(rating=fb["rating"], comment=fb["comment"], message_id=mid)
 
         conversations.append(
             Conversation(

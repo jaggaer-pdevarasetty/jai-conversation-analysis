@@ -101,7 +101,7 @@ export default function TenantsPage() {
 
       <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2 }}>
         <Typography variant="h3">Tenant directory</Typography>
-        <Typography variant="body2" color="text.secondary">{visibleTenants.length} {visibleTenants.length === 1 ? "tenant" : "tenants"}</Typography>
+        <Typography variant="body2" color="text.secondary">{filteredTenants.length} {filteredTenants.length === 1 ? "tenant" : "tenants"}</Typography>
       </Box>
 
       {visibleTenants.length ? (
@@ -142,7 +142,22 @@ export default function TenantsPage() {
           <SearchRoundedIcon sx={{ fontSize: 36, color: "text.disabled" }} />
           <Typography variant="h3" sx={{ mt: 1 }}>No tenants match</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>Try searching with a different tenant name or ID.</Typography>
-          <Button sx={{ mt: 2 }} onClick={() => setSearch("")}>Clear search</Button>
+          <Button sx={{ mt: 2 }} onClick={() => { setSearch(""); setPage(0); }}>Clear search</Button>
+        </Paper>
+      )}
+
+      {filteredTenants.length > rowsPerPage && (
+        <Paper sx={{ overflow: "hidden" }}>
+          <TablePagination
+            component="div"
+            count={filteredTenants.length}
+            page={page}
+            rowsPerPage={rowsPerPage}
+            rowsPerPageOptions={[12, 24, 48]}
+            onPageChange={(_, nextPage) => setPage(nextPage)}
+            onRowsPerPageChange={(event) => { setRowsPerPage(Number(event.target.value)); setPage(0); }}
+            labelRowsPerPage="Tenants per page"
+          />
         </Paper>
       )}
     </Stack>

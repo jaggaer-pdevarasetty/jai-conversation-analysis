@@ -23,6 +23,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   TextField,
   Typography,
@@ -70,6 +71,9 @@ export default function UserConversationsPage() {
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [user, setUser] = useState<TenantUser | null>(null);
   const [items, setItems] = useState<UserConversation[] | null>(null);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
   const [search, setSearch] = useState("");
   const [outcome, setOutcome] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -77,9 +81,14 @@ export default function UserConversationsPage() {
   const load = useCallback(
     () => {
       setError(null);
-      return fetchUserConversations(tenantId, userId).then(setItems).catch(() => setError("The conversations could not be loaded. Check the API connection and try again."));
+      return fetchUserConversations(tenantId, userId, rowsPerPage, page * rowsPerPage)
+        .then((result) => {
+          setItems(result.items);
+          setTotal(result.total);
+        })
+        .catch(() => setError("The conversations could not be loaded. Check the API connection and try again."));
     },
-    [tenantId, userId],
+    [page, rowsPerPage, tenantId, userId],
   );
 
   useEffect(() => {
@@ -158,22 +167,22 @@ export default function UserConversationsPage() {
       </Box>
 
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", xl: "repeat(4, 1fr)" }, gap: 2 }}>
-        <StatCard label="Conversations" value={items.length.toLocaleString()} helper="All conversations for this user" icon={<ChatBubbleOutlineRoundedIcon />} />
-        <StatCard label="Analysed" value={analysed.toLocaleString()} helper="Ready for reviewer inspection" icon={<ChatBubbleOutlineRoundedIcon />} tone="#16815D" />
-        <StatCard label="In progress / queued" value={(analysing + waiting).toLocaleString()} helper="Waiting for analysis to complete" icon={<CircularProgress size={20} />} tone="#B75B08" />
-        <StatCard label="Messages" value={messages.toLocaleString()} helper="Across the listed conversations" icon={<ChatBubbleOutlineRoundedIcon />} tone="#356BB3" />
+        <StatCard label="Conversations" value={total.toLocaleString()} helper="All conversations for this user" icon={<ChatBubbleOutlineRoundedIcon />} />
+        <StatCard label="Analysed on page" value={analysed.toLocaleString()} helper="Ready for reviewer inspection" icon={<ChatBubbleOutlineRoundedIcon />} tone="#16815D" />
+        <StatCard label="In progress / queued" value={(analysing + waiting).toLocaleString()} helper="On the current page" icon={<CircularProgress size={20} />} tone="#B75B08" />
+        <StatCard label="Messages on page" value={messages.toLocaleString()} helper="Across the current page" icon={<ChatBubbleOutlineRoundedIcon />} tone="#356BB3" />
       </Box>
 
       <Paper sx={{ p: 2, display: "grid", gridTemplateColumns: { xs: "1fr", md: "minmax(260px, 1fr) 230px" }, gap: 1.5 }}>
         <TextField
           size="small"
-          label="Search conversations"
+          label="Search this page"
           placeholder="Title, conversation ID, or recommendation"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           InputProps={{ startAdornment: <InputAdornment position="start"><SearchRoundedIcon fontSize="small" /></InputAdornment> }}
         />
-        <TextField fullWidth select size="small" label="Outcome or status" value={outcome} onChange={(event) => setOutcome(event.target.value)}>
+        <TextField fullWidth select size="small" label="Outcome on this page" value={outcome} onChange={(event) => setOutcome(event.target.value)}>
           <MenuItem value="">All outcomes</MenuItem>
           <MenuItem value="analysing">Analysing</MenuItem>
           <MenuItem value="pending">Queued</MenuItem>
@@ -188,7 +197,7 @@ export default function UserConversationsPage() {
       <TableContainer component={Paper}>
         <Box sx={{ px: 2.5, py: 2, display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid", borderColor: "divider" }}>
           <Typography variant="h3">Conversations</Typography>
-          <Typography variant="body2" color="text.secondary">{visibleItems.length} of {items.length}</Typography>
+          <Typography variant="body2" color="text.secondary">{visibleItems.length} of {items.length} on this page</Typography>
         </Box>
         <Table aria-label="Conversations" sx={{ minWidth: 980 }}>
           <TableHead>
@@ -236,6 +245,16 @@ export default function UserConversationsPage() {
             )}
           </TableBody>
         </Table>
+        <TablePagination
+          component="div"
+          count={total}
+          page={page}
+          rowsPerPage={rowsPerPage}
+          rowsPerPageOptions={[10, 25, 50, 100]}
+          onPageChange={(_, nextPage) => { setPage(nextPage); setSearch(""); setOutcome(""); }}
+          onRowsPerPageChange={(event) => { setRowsPerPage(Number(event.target.value)); setPage(0); setSearch(""); setOutcome(""); }}
+          labelRowsPerPage="Conversations per page"
+        />
       </TableContainer>
     </Stack>
   );

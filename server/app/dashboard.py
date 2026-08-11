@@ -10,7 +10,7 @@ ADR-0007 / AC-10. Keep access restricted to internal reviewers.
 
 from __future__ import annotations
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
 from .chatdb import _engine, safe_schema
 from .store import CommonStore
@@ -86,16 +86,75 @@ def users(tenant_id: str) -> list[dict]:
     ]
 
 
-def user_conversations(store: CommonStore, tenant_id: str, user_id: str) -> list[dict]:
+def conversation_meta(ids: list[str]) -> dict[str, dict]:
+    """Batch-fetch source metadata (tenant/user/title/timestamps) for conversation ids.
+    Used to enrich the feedback table + conversation detail. READ-ONLY; one query (no N+1)."""
+    if not ids:
+        return {}
+    stmt = text(
+        f'select conv.id, conv.tenant_id, conv.user_id, conv.title, conv.status, '
+        f'conv.created_at, conv.last_message_at, conv.message_count, '
+        f't.name as tenant_name, u.user_name '
+        f'from "{_sch()}".conversations conv '
+        f'left join "{_sch()}".tenants t on t.tenant_id = conv.tenant_id '
+        f'left join "{_sch()}".users u on u.user_id = conv.user_id and u.tenant_id = conv.tenant_id '
+        f'where conv.id::text in :ids'
+    ).bindparams(bindparam("ids", expanding=True))
     with _engine().connect() as c:
+        rows = c.execute(stmt, {"ids": ids}).mappings().all()
+    return {
+        str(r["id"]): {
+            "tenant_id": str(r["tenant_id"]) if r["tenant_id"] is not None else None,
+            "tenant_name": r["tenant_name"] or (f"Tenant {r['tenant_id']}" if r["tenant_id"] else None),
+            "user_id": str(r["user_id"]) if r["user_id"] is not None else None,
+            "user_name": r["user_name"] or (f"User {r['user_id']}" if r["user_id"] else None),
+            "title": r["title"],
+            "status": r["status"],
+            "created_at": str(r["created_at"]) if r["created_at"] else None,
+            "last_message_at": str(r["last_message_at"]) if r["last_message_at"] else None,
+            "message_count": r["message_count"],
+        }
+        for r in rows
+    }
+
+
+def feedback_message_ids(ids: list[str]) -> dict[str, str]:
+    if not ids:
+        return {}
+    stmt = text(
+        f'select m.conversation_id, f.message_id from "{_sch()}".feedback f '
+        f'join "{_sch()}".messages m on m.id = f.message_id '
+        f'where m.conversation_id::text in :ids and f.rating is not null '
+        f'order by m.conversation_id, m.sequence_num'
+    ).bindparams(bindparam("ids", expanding=True))
+    with _engine().connect() as c:
+        rows = c.execute(stmt, {"ids": ids}).mappings().all()
+    result: dict[str, str] = {}
+    for row in rows:
+        result.setdefault(str(row["conversation_id"]), str(row["message_id"]))
+    return result
+
+
+def user_conversations(
+    store: CommonStore, tenant_id: str, user_id: str, limit: int = 25, offset: int = 0
+) -> tuple[list[dict], int]:
+    params = {"tid": int(tenant_id), "uid": int(user_id), "limit": limit, "offset": offset}
+    with _engine().connect() as c:
+        total = int(c.execute(
+            text(
+                f'select count(*) from "{_sch()}".conversations '
+                f'where is_deleted = false and tenant_id = :tid and user_id = :uid'
+            ),
+            params,
+        ).scalar_one())
         rows = c.execute(
             text(
                 f'select id, title, status, last_message_at, message_count '
                 f'from "{_sch()}".conversations '
                 f'where is_deleted = false and tenant_id = :tid and user_id = :uid '
-                f'order by last_message_at desc nulls last'
+                f'order by last_message_at desc nulls last limit :limit offset :offset'
             ),
-            {"tid": int(tenant_id), "uid": int(user_id)},
+            params,
         ).mappings().all()
     out = []
     for r in rows:
@@ -120,4 +179,4 @@ def user_conversations(store: CommonStore, tenant_id: str, user_id: str) -> list
                 "recommended_next_step": rec.recommended_next_step if rec else None,
             }
         )
-    return out
+    return out, total

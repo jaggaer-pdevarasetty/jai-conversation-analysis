@@ -182,8 +182,16 @@ def _conversation_detail(conversation_id: str) -> dict | None:
     conv = store.get_conversation(conversation_id)
     if record is None or conv is None:
         return None
+    source = None
+    try:
+        from . import dashboard
+
+        source = dashboard.conversation_meta([conversation_id]).get(conversation_id)
+    except Exception:  # noqa: BLE001 - chat DB optional; detail still works de-identified
+        source = None
     return {
         "conversation_id": conversation_id,
+        "source": source,  # tenant/user/title/timestamps (authorised admin view)
         "analysis": {
             "category": record.category,
             "model_category": record.model_category,
@@ -224,27 +232,51 @@ def get_conversation(conversation_id: str):
 
 @api.get("/feedback")
 def feedback_conversations():
-    """Conversations where the user gave EXPLICIT thumbs feedback — with the deep analysis
-    (what happened / why / how to avoid / suggestions) and the user's remark."""
+    """Conversations where the user gave EXPLICIT thumbs feedback — rich analytics row per
+    conversation (tenant/user/title/tokens/timestamps + category + the deep root-cause
+    analysis + the user's remark) for a reviewer table."""
     items = []
     for record in store.list():
         conv = store.get_conversation(record.conversation_id)
         if conv is None or conv.feedback.rating is None:
             continue
+        m = record.metrics
+        deep = asdict(record.deep) if record.deep else None
         items.append(
             {
                 "conversation_id": record.conversation_id,
                 "category": record.category,
+                "model_category": record.model_category,
                 "confidence": record.confidence,
                 "rating": conv.feedback.rating,
                 "comment": conv.feedback.comment,
                 "recommended_next_step": record.recommended_next_step,
-                "deep": asdict(record.deep) if record.deep else None,
+                "rationale": record.rationale,
+                "why_it_happened": (deep or {}).get("why_it_happened", ""),
+                "input_tokens": m.input_tokens,
+                "output_tokens": m.output_tokens,
+                "analyzed_at": record.analyzed_at,
+                "analyzer_version": record.analyzer_version,
+                "deep": deep,
             }
         )
-    # thumbs-down first (most actionable), then the rest
-    items.sort(key=lambda it: (it["rating"] is not False))
-    return {"items": items, "total": len(items)}
+    # enrich with source metadata (tenant/user/title/timestamps) so the UI can show a table
+    try:
+        from . import dashboard
+
+        meta = dashboard.conversation_meta([it["conversation_id"] for it in items])
+    except Exception:  # noqa: BLE001 - chat DB optional
+        meta = {}
+    for it in items:
+        it.update(meta.get(it["conversation_id"], {}))
+
+    items.sort(key=lambda it: (it["rating"] is not False))  # thumbs-down first (most actionable)
+    return {
+        "items": items,
+        "total": len(items),
+        "positive": sum(1 for it in items if it["rating"]),
+        "negative": sum(1 for it in items if not it["rating"]),
+    }
 
 
 @api.post("/conversations/{conversation_id}/analyze")
@@ -336,11 +368,16 @@ def dashboard_users(tenant_id: str):
 
 
 @api.get("/dashboard/tenants/{tenant_id}/users/{user_id}/conversations")
-def dashboard_user_conversations(tenant_id: str, user_id: str):
+def dashboard_user_conversations(
+    tenant_id: str,
+    user_id: str,
+    limit: int = Query(default=25, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+):
     from . import dashboard
 
     try:
-        items = dashboard.user_conversations(store, tenant_id, user_id)
+        items, total = dashboard.user_conversations(store, tenant_id, user_id, limit, offset)
     except Exception as exc:  # noqa: BLE001
         return problem_response(503, "Chat DB unavailable", type(exc).__name__)
 
@@ -351,7 +388,7 @@ def dashboard_user_conversations(tenant_id: str, user_id: str):
         for it in items:
             if it["conversation_id"] in accepted:
                 it["status"] = "analysing"
-    return {"items": items}
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 @api.get("/queue")

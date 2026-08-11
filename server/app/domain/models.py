@@ -54,6 +54,7 @@ class Message:
 class Feedback:
     rating: Optional[bool] = None  # True=up, False=down, None=none
     comment: Optional[str] = None
+    message_id: Optional[str] = None
 
 
 # ── Source side (pre-de-identification; carries identifiers) ─────────────────

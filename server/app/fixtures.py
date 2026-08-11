@@ -59,7 +59,7 @@ CONVERSATIONS: list[Conversation] = [
         tenant_id="20256789",
         title="How do I approve an invoice?",
         created_at=_TS,
-        feedback=Feedback(rating=True, comment="Perfect, thanks!"),
+        feedback=Feedback(rating=True, comment="Perfect, thanks!", message_id="a3000000-0000-4000-8000-000000000002"),
         messages=[
             _user("a3000000-0000-4000-8000-000000000001", "How do I approve an invoice?", 1),
             _assistant("a3000000-0000-4000-8000-000000000002", "Open the invoice, review the lines, then click Approve.", 2),
@@ -70,7 +70,7 @@ CONVERSATIONS: list[Conversation] = [
         tenant_id="20256789",
         title="Punch-out not working",
         created_at=_TS,
-        feedback=Feedback(rating=False, comment="This did not help."),
+        feedback=Feedback(rating=False, comment="This did not help.", message_id="a4000000-0000-4000-8000-000000000002"),
         messages=[
             _user("a4000000-0000-4000-8000-000000000001", "My punch-out catalog will not load.", 1),
             _assistant("a4000000-0000-4000-8000-000000000002", "Try clearing your browser cache.", 2),

@@ -31,6 +31,12 @@ export interface UserConversation {
   confidence: string | null;
   recommended_next_step: string | null;
 }
+export interface UserConversationPage {
+  items: UserConversation[];
+  total: number;
+  limit: number;
+  offset: number;
+}
 
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`);
@@ -45,7 +51,7 @@ export const fetchTenantUsers = (tenantId: string) =>
   getJson<{ items: TenantUser[] }>(`/api/analysis/dashboard/tenants/${tenantId}/users`).then(
     (d) => d.items,
   );
-export const fetchUserConversations = (tenantId: string, userId: string) =>
-  getJson<{ items: UserConversation[] }>(
-    `/api/analysis/dashboard/tenants/${tenantId}/users/${userId}/conversations`,
-  ).then((d) => d.items);
+export const fetchUserConversations = (tenantId: string, userId: string, limit = 25, offset = 0) =>
+  getJson<UserConversationPage>(
+    `/api/analysis/dashboard/tenants/${tenantId}/users/${userId}/conversations?limit=${limit}&offset=${offset}`,
+  );

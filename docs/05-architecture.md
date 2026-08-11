@@ -84,7 +84,8 @@ Reviewers may override the assigned category; the override is stored as an audit
 - `app/conversations/` — separate pooled review queue and de-identified conversation-review routes.
 - `src/services/dashboardApi.ts` — typed tenant/user/conversation dashboard fetch layer.
 - `src/services/analysisApi.ts` — typed pooled list/detail/run fetch layer.
-- `src/components/ReviewerTable.tsx` — searchable, filterable, priority-sorted pooled review queue.
+- `src/components/ReviewerTable.tsx` — server-paginated, searchable, filterable pooled review queue.
+- `src/components/AnalysisQueuePanel.tsx` — polling view of real queued/in-flight conversation IDs.
 - `src/components/ConversationDetail.tsx` — transcript + evidence + metrics + feedback + override audit.
 - `src/components/MarkdownContent.tsx` — safe React renderer for the Markdown subset used in untrusted chat content.
 - `src/components/AppShell.tsx` / `src/theme.ts` — responsive navigation, privacy-scope labels, shared MUI design system.
