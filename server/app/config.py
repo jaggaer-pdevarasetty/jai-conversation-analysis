@@ -50,6 +50,8 @@ class Settings:
     gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
     # Conversations classified per LLM call (batching cuts API calls ~batch_size-fold).
     batch_size: int = int(os.getenv("BATCH_SIZE", "10"))
+    # On-demand (re)analyse cap per conversation per day (prevents abuse / runaway cost).
+    max_analyses_per_day: int = int(os.getenv("MAX_ANALYSES_PER_DAY", "3"))
 
     # Common store: "memory" (default, for tests/no-DB) or "sql" (Postgres — ADR-0009).
     # SQLite is intentionally NOT supported for storing data; use Postgres (podman/Docker).

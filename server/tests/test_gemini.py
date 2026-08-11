@@ -4,6 +4,7 @@ import json
 import re
 
 from app import gemini
+from app.domain.models import Conversation, Feedback, Message
 from app.fixtures import CONVERSATIONS
 
 
@@ -61,3 +62,29 @@ def test_batch_group_hard_failure_omits_conversations():
 
 def test_make_batch_analyzer_defaults_to_rules_without_vertex():
     assert gemini.make_batch_analyzer() is gemini.analyze_batch_rules
+
+
+def test_pii_is_scrubbed_before_reaching_the_llm():
+    conv = Conversation(
+        id="p1", tenant_id="t", title=None, created_at="2020-01-01T00:00:00", feedback=Feedback(),
+        messages=[
+            Message(
+                id="m1", role="user", sequence_num=1, created_at="2020-01-01T00:00:00",
+                content="email me at john.doe@acme.com or call +1 555-123-4567 please",
+            )
+        ],
+    )
+    captured: dict = {}
+
+    def capturing(prompt: str) -> str:
+        captured["prompt"] = prompt
+        return json.dumps(
+            [{"conversation_id": "p1", "category": "resolved", "confidence": "low",
+              "recommended_next_step": "No action needed.", "rationale": "ok"}]
+        )
+
+    gemini.analyze_batch_vertex([conv], "run", "t", generate=capturing)
+    prompt = captured["prompt"]
+    assert "john.doe@acme.com" not in prompt  # raw PII must NOT reach the LLM
+    assert "555-123-4567" not in prompt
+    assert "[email]" in prompt and "[phone]" in prompt

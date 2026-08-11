@@ -104,12 +104,11 @@ def list_conversations(
     }
 
 
-@api.get("/conversations/{conversation_id}")
-def get_conversation(conversation_id: str):
+def _conversation_detail(conversation_id: str) -> dict | None:
     record = store.get_analysis(conversation_id)
     conv = store.get_conversation(conversation_id)
     if record is None or conv is None:
-        return problem_response(404, "Not found", f"No analysis for conversation {conversation_id}")
+        return None
     return {
         "conversation_id": conversation_id,
         "analysis": {
@@ -139,6 +138,45 @@ def get_conversation(conversation_id: str):
         ],
         "feedback": {"rating": conv.feedback.rating, "comment": conv.feedback.comment},
     }
+
+
+@api.get("/conversations/{conversation_id}")
+def get_conversation(conversation_id: str):
+    payload = _conversation_detail(conversation_id)
+    if payload is None:
+        return problem_response(404, "Not found", f"No analysis for conversation {conversation_id}")
+    return payload
+
+
+@api.post("/conversations/{conversation_id}/analyze")
+def analyze_conversation(conversation_id: str):
+    """On-demand (re)analyse ONE conversation now. Capped at MAX_ANALYSES_PER_DAY per convo."""
+    import uuid
+    from datetime import datetime, timezone
+
+    from .chatdb import load_one_from_chatdb
+    from .deidentify import deidentify
+
+    if store.analyses_today(conversation_id) >= settings.max_analyses_per_day:
+        return problem_response(
+            429, "Daily analyse limit reached",
+            f"This conversation was already analysed {settings.max_analyses_per_day} times today.",
+        )
+    try:
+        conv = load_one_from_chatdb(conversation_id)
+    except Exception as exc:  # noqa: BLE001
+        return problem_response(503, "Chat DB unavailable", type(exc).__name__)
+    if conv is None:
+        return problem_response(404, "Not found", f"No source conversation {conversation_id}")
+
+    now = datetime.now(timezone.utc)
+    records = make_batch_analyzer()([conv], f"ondemand_{uuid.uuid4().hex[:8]}", now.isoformat())
+    if not records:
+        store.mark_failed(conversation_id)
+        return problem_response(503, "Analysis failed", "model unavailable; please retry")
+    store.record_analysis(conversation_id, now.isoformat())
+    store.upsert(records[0], deidentify(conv))
+    return _conversation_detail(conversation_id)
 
 
 class OverrideBody(BaseModel):

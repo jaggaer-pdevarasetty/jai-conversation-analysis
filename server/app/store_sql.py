@@ -9,8 +9,20 @@ is intentionally not used for storing data. Still conversation_id-only and de-id
 from __future__ import annotations
 
 from dataclasses import asdict
+from datetime import date
 
-from sqlalchemy import JSON, Column, MetaData, String, Table, create_engine, delete, func, select
+from sqlalchemy import (
+    JSON,
+    Column,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    create_engine,
+    delete,
+    func,
+    select,
+)
 
 from .domain.category import recommended_next_step
 from .domain.models import (
@@ -40,6 +52,12 @@ _conversation = Table(
 _failed = Table(
     "failed", _metadata,
     Column("conversation_id", String, primary_key=True),
+)
+_analyze_event = Table(
+    "analyze_event", _metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("conversation_id", String, index=True),
+    Column("at", String),  # ISO timestamp; daily cap counts by date prefix
 )
 
 
@@ -142,3 +160,22 @@ class SqlResultStore:
     def unanalysed_count(self) -> int:
         with self._engine.begin() as conn:
             return int(conn.execute(select(func.count()).select_from(_failed)).scalar_one())
+
+    # rate-limit bookkeeping (on-demand analyse) ------------------------------
+    def record_analysis(self, conversation_id: str, at_iso: str) -> None:
+        with self._engine.begin() as conn:
+            conn.execute(_analyze_event.insert().values(conversation_id=conversation_id, at=at_iso))
+
+    def analyses_today(self, conversation_id: str, today: str | None = None) -> int:
+        today = today or date.today().isoformat()
+        with self._engine.begin() as conn:
+            return int(
+                conn.execute(
+                    select(func.count())
+                    .select_from(_analyze_event)
+                    .where(
+                        _analyze_event.c.conversation_id == conversation_id,
+                        _analyze_event.c.at.like(f"{today}%"),
+                    )
+                ).scalar_one()
+            )

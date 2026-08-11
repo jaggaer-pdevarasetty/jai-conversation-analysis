@@ -23,6 +23,7 @@ from .domain.analyze import analyze as rules_analyze
 from .domain.analyze import compute_metrics, compute_signals
 from .domain.category import recommended_next_step
 from .domain.models import CATEGORIES, AnalysisRecord, Conversation
+from .domain.signals import scrub_pii
 
 # Turns a prompt into raw model text; injected in tests so they never touch the SDK.
 Generator = Callable[[str], str]
@@ -50,7 +51,8 @@ _SYSTEM = (
 
 
 def _transcript(conv: Conversation) -> str:
-    lines = [f"{m.role}: {m.content[:_MAX_CHARS]}" for m in conv.messages]
+    # PII BOUNDARY: scrub emails/phones out of every message BEFORE it reaches the LLM.
+    lines = [f"{m.role}: {scrub_pii(m.content)[:_MAX_CHARS]}" for m in conv.messages]
     return "\n".join(lines)
 
 

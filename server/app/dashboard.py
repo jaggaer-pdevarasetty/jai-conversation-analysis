@@ -12,13 +12,12 @@ from __future__ import annotations
 
 from sqlalchemy import text
 
-from .chatdb import _engine
-from .config import settings
+from .chatdb import _engine, safe_schema
 from .store import CommonStore
 
 
 def _sch() -> str:
-    return settings.chat_db_schema
+    return safe_schema()
 
 
 def overview(store: CommonStore) -> dict:

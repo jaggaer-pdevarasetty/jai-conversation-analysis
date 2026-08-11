@@ -13,12 +13,23 @@ dropped by de-identify() (ADR-0007) before anything reaches the common store. We
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 
 from sqlalchemy import bindparam, create_engine, text
 
 from .config import settings
 from .domain.models import Conversation, Feedback, Message
+
+_IDENT = re.compile(r"^[A-Za-z0-9_]+$")
+
+
+def safe_schema() -> str:
+    """Whitelist the schema NAME (it's interpolated into SQL; values use bound params)."""
+    sch = settings.chat_db_schema
+    if not _IDENT.match(sch):
+        raise ValueError(f"invalid CHAT_DB_SCHEMA: {sch!r}")
+    return sch
 
 
 def _engine():
@@ -29,21 +40,39 @@ def _engine():
     return create_engine(url, connect_args={"connect_timeout": 15})
 
 
-def load_from_chatdb(limit: int | None = None, engine=None) -> list[Conversation]:
+def load_one_from_chatdb(conversation_id: str, engine=None) -> Conversation | None:
+    """Load a single conversation by id (for on-demand analyse)."""
+    convs = load_from_chatdb(engine=engine, ids=[conversation_id])
+    return convs[0] if convs else None
+
+
+def load_from_chatdb(
+    limit: int | None = None, engine=None, ids: list[str] | None = None
+) -> list[Conversation]:
     limit = limit or settings.chatdb_limit
-    sch = settings.chat_db_schema
+    sch = safe_schema()
     eng = engine or _engine()
     try:
         with eng.connect() as c:
-            convs = c.execute(
-                text(
-                    f'select id, tenant_id, user_id, title, created_at, last_message_at '
-                    f'from "{sch}".conversations '
-                    f'where is_deleted = false '
-                    f'order by last_message_at desc nulls last limit :lim'
-                ),
-                {"lim": limit},
-            ).mappings().all()
+            if ids is not None:
+                convs = c.execute(
+                    text(
+                        f'select id, tenant_id, user_id, title, created_at, last_message_at '
+                        f'from "{sch}".conversations '
+                        f'where is_deleted = false and id::text in :cids'
+                    ).bindparams(bindparam("cids", expanding=True)),
+                    {"cids": ids},
+                ).mappings().all()
+            else:
+                convs = c.execute(
+                    text(
+                        f'select id, tenant_id, user_id, title, created_at, last_message_at '
+                        f'from "{sch}".conversations '
+                        f'where is_deleted = false '
+                        f'order by last_message_at desc nulls last limit :lim'
+                    ),
+                    {"lim": limit},
+                ).mappings().all()
             ids = [str(r["id"]) for r in convs]
             if not ids:
                 return []

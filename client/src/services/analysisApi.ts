@@ -80,6 +80,15 @@ export async function fetchConversation(id: string): Promise<ConversationDetail>
   return (await res.json()) as ConversationDetail;
 }
 
+/** On-demand (re)analyse one conversation now (capped server-side per day). */
+export async function analyzeConversation(id: string): Promise<void> {
+  const res = await fetch(
+    `${API_BASE}/api/analysis/conversations/${encodeURIComponent(id)}/analyze`,
+    { method: "POST" },
+  );
+  if (!res.ok) throw new Error(`Analyse failed: ${res.status}`);
+}
+
 /** Human override of the category (audited). */
 export async function overrideCategory(id: string, category: string, actor: string): Promise<void> {
   const res = await fetch(

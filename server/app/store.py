@@ -6,7 +6,7 @@ analysis records + failed/retry set. No tenant/user anywhere.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from .domain.models import (
     CATEGORIES,
@@ -23,6 +23,15 @@ class CommonStore:
         self._analyses: dict[str, AnalysisRecord] = {}
         self._conversations: dict[str, CommonConversation] = {}
         self._failed: set[str] = set()
+        self._events: dict[str, list[str]] = {}  # conversation_id -> ISO analyse timestamps
+
+    # rate-limit bookkeeping (on-demand analyse) ------------------------------
+    def record_analysis(self, conversation_id: str, at_iso: str) -> None:
+        self._events.setdefault(conversation_id, []).append(at_iso)
+
+    def analyses_today(self, conversation_id: str, today: str | None = None) -> int:
+        today = today or date.today().isoformat()
+        return sum(1 for ts in self._events.get(conversation_id, []) if ts.startswith(today))
 
     # writes ------------------------------------------------------------------
     def upsert(self, record: AnalysisRecord, conversation: CommonConversation) -> None:
