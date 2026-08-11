@@ -79,9 +79,14 @@ Reviewers may override the assigned category; the override is stored as an audit
 - `langsmith.py` — read client (tokens/latency). `problem.py` — RFC 7807. `main.py` — FastAPI app + routes.
 
 ## Client modules (`client/`)
-- `app/` — Next.js App Router (`layout.tsx`, `page.tsx`).
-- `src/services/analysisApi.ts` — fetch layer (mirrors chat's services pattern).
-- `src/components/ReviewerTable.tsx` — MUI table + labelled category filter (FR-2/3/4).
+- `app/page.tsx` — redirects the default route to the tenant directory (`/tenants`).
+- `app/tenants/` — authorised tenant → users → conversations administration workflow.
+- `app/conversations/` — separate pooled review queue and de-identified conversation-review routes.
+- `src/services/dashboardApi.ts` — typed tenant/user/conversation dashboard fetch layer.
+- `src/services/analysisApi.ts` — typed pooled list/detail/run fetch layer.
+- `src/components/ReviewerTable.tsx` — searchable, filterable, priority-sorted pooled review queue.
+- `src/components/ConversationDetail.tsx` — transcript + evidence + metrics + feedback + override audit.
+- `src/components/AppShell.tsx` / `src/theme.ts` — responsive navigation, privacy-scope labels, shared MUI design system.
 - `src/config.ts` — API base URL.
 
 ## Correlation identifiers (verified in the org repos)

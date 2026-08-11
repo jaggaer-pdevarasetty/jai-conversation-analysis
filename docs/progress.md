@@ -111,11 +111,36 @@ non-English handling. Working on branch **`feature/J1-93353-conversation-analysi
 - **Pagination + 429 backoff** for LangSmith (kept for token enrichment only).
 - Facts: results store = **podman Postgres** `localhost:5433/analysis` (NOT sqlite).
 
+## Done — execution increment 8 (reviewer UI/UX rewrite)
+- **Reviewer-first UI** (ADR-0013): replaced the source-identity overview with a pooled health
+  dashboard built from analysis + latest-run data; primary navigation is now health → queue → review.
+- **Health overview:** outcome mix, positive/attention rates, telemetry completeness, run status,
+  retry visibility, review signals, and recent analyses without requiring the live chat DB.
+- **Review queue:** ID/action search, category + confidence filters, priority/newest/confidence sort,
+  explicit loading/error/empty states, human-override and feedback indicators, formatted telemetry.
+- **Conversation review:** transcript-first layout with model evidence/signals, recommendation,
+  feedback, complete token/TTFT telemetry, run/analyzer audit metadata, and audited override control.
+- **Responsive/accessibility:** mobile drawer, no page-level horizontal overflow at 375px, labelled
+  controls and status regions. Verified against 51 live local records with no browser runtime errors.
+- Green: **client 9 jest + typecheck + lint + production build; server 47 pytest, 3 skipped**.
+
+## Done — execution increment 9 (tenant-first workspace correction)
+- **Tenant-first routing** (ADR-0014, supersedes ADR-0013 landing decision): `/` redirects to
+  `/tenants`; Health overview was removed; primary navigation now exposes Tenants + Review queue.
+- **Tenant directory:** name/ID search, tenant/user/conversation totals, responsive organisation
+  cards, and explicit loading/error/empty states.
+- **Tenant users:** tenant context, role filtering, user search, volume summaries, and direct
+  user-conversation routing.
+- **User conversations:** tenant/user breadcrumbs, analysis progress, outcome/status filtering,
+  message and analysis counts, lazy-analysis refresh, and safe review links only after analysis.
+- **Scope clarity:** tenant pages are labelled Authorised admin view; pooled conversation routes
+  remain separately labelled De-identified review.
+
 ## Next
 1. Repopulate `analysis` from `chatdb` via Vertex + restart backend (approved) → UI shows real data.
 2. Fix `.env`: `CHAT_DB_URL` db = `jai_agentos_uit`, `CHAT_DB_SCHEMA=jai_agentos_schema_uit`, `SOURCE=chatdb`.
 3. Grow the eval gold set to 100–200 real labelled conversations (≥85% gate).
-4. Client detail view (transcript + tokens) + override UI.
+4. Add server-side search/pagination and trend endpoints once review volume requires them.
 5. Scheduler wiring (every 4h) with rate-limit-aware batch.
 
 ## Blockers / needs

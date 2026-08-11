@@ -101,6 +101,12 @@ def user_conversations(store: CommonStore, tenant_id: str, user_id: str) -> list
     for r in rows:
         cid = str(r["id"])
         rec = store.get_analysis(cid)
+        if rec is not None:
+            status = "analysed"
+        elif store.is_analyzing(cid):
+            status = "analysing"
+        else:
+            status = "pending"
         out.append(
             {
                 "conversation_id": cid,
@@ -108,6 +114,7 @@ def user_conversations(store: CommonStore, tenant_id: str, user_id: str) -> list
                 "message_count": r["message_count"],
                 "last_message_at": str(r["last_message_at"]) if r["last_message_at"] else None,
                 "analysed": rec is not None,
+                "status": status,
                 "category": rec.category if rec else None,
                 "confidence": rec.confidence if rec else None,
                 "recommended_next_step": rec.recommended_next_step if rec else None,

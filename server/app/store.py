@@ -24,6 +24,17 @@ class CommonStore:
         self._conversations: dict[str, CommonConversation] = {}
         self._failed: set[str] = set()
         self._events: dict[str, list[str]] = {}  # conversation_id -> ISO analyse timestamps
+        self._analyzing: set[str] = set()  # transient: in-flight lazy/background analyses
+
+    # in-progress bookkeeping (lazy analyse) ----------------------------------
+    def mark_analyzing(self, conversation_ids: list[str]) -> None:
+        self._analyzing.update(conversation_ids)
+
+    def clear_analyzing(self, conversation_id: str) -> None:
+        self._analyzing.discard(conversation_id)
+
+    def is_analyzing(self, conversation_id: str) -> bool:
+        return conversation_id in self._analyzing
 
     # rate-limit bookkeeping (on-demand analyse) ------------------------------
     def record_analysis(self, conversation_id: str, at_iso: str) -> None:

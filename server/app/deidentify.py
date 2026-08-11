@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from .domain.models import CommonConversation, Conversation, Feedback
-from .domain.signals import scrub_pii
+from .pii import redact as scrub_pii
 
 
 def deidentify(conv: Conversation) -> CommonConversation:

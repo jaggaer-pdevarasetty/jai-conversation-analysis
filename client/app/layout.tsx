@@ -3,14 +3,14 @@ import { AppShell } from "../src/components/AppShell";
 import { Providers } from "../src/components/Providers";
 
 export const metadata = {
-  title: "JAGGAER · Conversation Analysis",
-  description: "Auto-analysed JAI Assist conversations for internal reviewers",
+  title: "JAI Conversation Intelligence",
+  description: "Tenant conversation administration and evidence-led review for JAI Assist",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body>
+      <body style={{ margin: 0 }}>
         <Providers>
           <AppShell>{children}</AppShell>
         </Providers>

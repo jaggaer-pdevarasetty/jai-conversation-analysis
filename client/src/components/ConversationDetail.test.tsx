@@ -32,19 +32,20 @@ jest.mock("../services/analysisApi", () => ({
 }));
 
 describe("ConversationDetail", () => {
-  it("shows transcript, dynamic recommendation, confidence and real metrics", async () => {
+  it("shows transcript, review evidence, confidence and formatted metrics", async () => {
     render(<ConversationDetail id="abc123" initial={record} />);
     expect(screen.getByText("Improve the password-reset answer.")).toBeInTheDocument();
-    expect(screen.getByText(/confidence: high/)).toBeInTheDocument();
+    expect(screen.getByText("High confidence")).toBeInTheDocument();
     expect(screen.getByText("How do I reset my password?")).toBeInTheDocument();
-    expect(screen.getByText(/Latency \(ms\): 11440/)).toBeInTheDocument();
-    expect(screen.getByText(/Input tokens: 35293/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Time to first token")).toHaveTextContent("11.4 s");
+    expect(screen.getByLabelText("Input tokens")).toHaveTextContent("35,293");
+    expect(screen.getByText("The user repeated the same question.")).toBeInTheDocument();
   });
 
   it("submits a human override", async () => {
     render(<ConversationDetail id="abc123" initial={record} />);
     await userEvent.click(screen.getByLabelText("New category"));
-    await userEvent.click(await screen.findByRole("option", { name: "out_of_scope" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Out of scope" }));
     await userEvent.click(screen.getByRole("button", { name: "Save override" }));
     await waitFor(() => expect(overrideMock).toHaveBeenCalledWith("abc123", "out_of_scope", "reviewer"));
   });

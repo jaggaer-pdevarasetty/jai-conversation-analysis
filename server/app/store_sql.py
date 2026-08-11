@@ -89,6 +89,17 @@ class SqlResultStore:
     def __init__(self, url: str) -> None:
         self._engine = create_engine(url, future=True)
         _metadata.create_all(self._engine)
+        self._analyzing: set[str] = set()  # transient runtime state (not persisted)
+
+    # in-progress bookkeeping (lazy analyse) ----------------------------------
+    def mark_analyzing(self, conversation_ids: list[str]) -> None:
+        self._analyzing.update(conversation_ids)
+
+    def clear_analyzing(self, conversation_id: str) -> None:
+        self._analyzing.discard(conversation_id)
+
+    def is_analyzing(self, conversation_id: str) -> bool:
+        return conversation_id in self._analyzing
 
     def _put(self, conn, table: Table, key: str, row: dict) -> None:
         conn.execute(delete(table).where(table.c.conversation_id == key))

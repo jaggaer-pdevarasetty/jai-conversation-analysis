@@ -52,6 +52,8 @@ class Settings:
     batch_size: int = int(os.getenv("BATCH_SIZE", "10"))
     # On-demand (re)analyse cap per conversation per day (prevents abuse / runaway cost).
     max_analyses_per_day: int = int(os.getenv("MAX_ANALYSES_PER_DAY", "3"))
+    # Lazy analyse: auto-analyse a user's un-analysed conversations when a reviewer opens them.
+    lazy_analyze: bool = os.getenv("LAZY_ANALYZE", "true").lower() == "true"
 
     # Common store: "memory" (default, for tests/no-DB) or "sql" (Postgres — ADR-0009).
     # SQLite is intentionally NOT supported for storing data; use Postgres (podman/Docker).

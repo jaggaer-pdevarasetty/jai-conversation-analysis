@@ -26,6 +26,7 @@ export interface UserConversation {
   message_count: number | null;
   last_message_at: string | null;
   analysed: boolean;
+  status: "analysed" | "analysing" | "pending";
   category: string | null;
   confidence: string | null;
   recommended_next_step: string | null;

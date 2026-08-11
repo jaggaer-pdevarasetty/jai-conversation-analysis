@@ -7,6 +7,15 @@ export interface Metrics {
   prompt_tokens: number | null;
 }
 
+export interface Signals {
+  feedback: "positive" | "negative" | null;
+  repeated_prompts: boolean;
+  abandoned: boolean;
+  error: boolean;
+  out_of_scope_intent: boolean;
+  frustrated: boolean;
+}
+
 export interface ListItem {
   conversation_id: string;
   category: string;
@@ -29,6 +38,16 @@ export interface ListResponse {
   offset: number;
 }
 
+export interface RunSummary {
+  run_id: string;
+  started_at: string;
+  completed_at: string;
+  analysed: number;
+  failed: number;
+  skipped: number;
+  unanalysed: number;
+}
+
 export interface Message {
   id: string;
   role: string;
@@ -46,8 +65,10 @@ export interface ConversationDetail {
     recommended_next_step: string;
     confidence: string;
     rationale: string;
+    signals?: Signals;
     status: string;
     override: { category: string; actor: string; at: string } | null;
+    run_id?: string;
     analyzed_at: string;
     analyzer_version?: string;
   };
@@ -64,20 +85,30 @@ export const CATEGORIES = [
   "out_of_scope",
 ] as const;
 
+async function getJson<T>(path: string): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`);
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { detail?: string } | null;
+    throw new Error(body?.detail ?? `Analysis API responded ${res.status}`);
+  }
+  return (await res.json()) as T;
+}
+
 /** Fetch analysed conversations from the FastAPI server (optionally filtered). */
 export async function fetchAnalysis(category?: string): Promise<ListResponse> {
   const url = new URL(`${API_BASE}/api/analysis/conversations`);
+  url.searchParams.set("limit", "200");
   if (category) url.searchParams.set("category", category);
   const res = await fetch(url.toString());
   if (!res.ok) throw new Error(`Analysis API responded ${res.status}`);
   return (await res.json()) as ListResponse;
 }
 
+export const fetchLatestRun = () => getJson<RunSummary>("/api/analysis/runs/latest");
+
 /** Fetch the full de-identified record for one conversation (FR-4). */
 export async function fetchConversation(id: string): Promise<ConversationDetail> {
-  const res = await fetch(`${API_BASE}/api/analysis/conversations/${encodeURIComponent(id)}`);
-  if (!res.ok) throw new Error(`Analysis API responded ${res.status}`);
-  return (await res.json()) as ConversationDetail;
+  return getJson<ConversationDetail>(`/api/analysis/conversations/${encodeURIComponent(id)}`);
 }
 
 /** On-demand (re)analyse one conversation now (capped server-side per day). */

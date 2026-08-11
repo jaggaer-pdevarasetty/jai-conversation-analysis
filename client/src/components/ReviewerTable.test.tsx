@@ -38,10 +38,11 @@ jest.mock("../services/analysisApi", () => ({
 import { fetchAnalysis } from "../services/analysisApi";
 
 describe("ReviewerTable", () => {
-  it("renders analysed conversations by conversation ID (no tenant column)", async () => {
+  it("renders a searchable review queue by conversation ID (no tenant column)", async () => {
     render(<ReviewerTable />);
     expect(await screen.findByRole("table", { name: "Analysed conversations" })).toBeInTheDocument();
     expect(await screen.findByText("11111111-1111-4111-8111-111111111111")).toBeInTheDocument();
+    expect(screen.getByLabelText("Search conversations")).toBeInTheDocument();
     expect(screen.queryByText(/tenant/i)).not.toBeInTheDocument();
   });
 
@@ -61,5 +62,12 @@ describe("ReviewerTable", () => {
     await screen.findByText("11111111-1111-4111-8111-111111111111");
     await userEvent.selectOptions(screen.getByLabelText("Filter by category"), "resolved");
     await waitFor(() => expect(fetchAnalysis).toHaveBeenLastCalledWith("resolved"));
+  });
+
+  it("searches the loaded queue by conversation ID or recommended action", async () => {
+    render(<ReviewerTable />);
+    await screen.findByText("11111111-1111-4111-8111-111111111111");
+    await userEvent.type(screen.getByLabelText("Search conversations"), "no matching conversation");
+    expect(screen.getByText("No conversations match")).toBeInTheDocument();
   });
 });

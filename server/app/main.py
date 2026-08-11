@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -236,14 +236,65 @@ def dashboard_users(tenant_id: str):
         return problem_response(503, "Chat DB unavailable", type(exc).__name__)
 
 
+def _lazy_analyze(conversation_ids: list[str]) -> None:
+    """Background: analyse a user's un-analysed conversations in CHUNKS, clearing 'analysing'
+    per conversation as each chunk finishes so the UI updates incrementally."""
+    import uuid
+    from datetime import datetime, timezone
+
+    from .chatdb import load_from_chatdb
+    from .deidentify import deidentify
+
+    now = datetime.now(timezone.utc).isoformat()
+    analyzer = make_batch_analyzer()
+    try:
+        convs = load_from_chatdb(ids=conversation_ids)
+    except Exception as exc:  # noqa: BLE001 - never crash a background task
+        print(f"[warn] lazy analyse load failed: {type(exc).__name__}", flush=True)
+        for cid in conversation_ids:
+            store.clear_analyzing(cid)
+        return
+
+    size = max(1, settings.batch_size)
+    for i in range(0, len(convs), size):
+        chunk = convs[i : i + size]
+        try:
+            records = {r.conversation_id: r for r in analyzer(chunk, f"lazy_{uuid.uuid4().hex[:8]}", now)}
+        except Exception:  # noqa: BLE001
+            records = {}
+        for conv in chunk:
+            rec = records.get(conv.id)
+            if rec is not None:
+                store.upsert(rec, deidentify(conv))
+                store.record_analysis(conv.id, now)
+            else:
+                store.mark_failed(conv.id)
+            store.clear_analyzing(conv.id)  # incremental: this one is done now
+
+    loaded = {c.id for c in convs}
+    for cid in conversation_ids:  # ids that no longer exist → don't leave them 'analysing'
+        if cid not in loaded:
+            store.clear_analyzing(cid)
+
+
 @api.get("/dashboard/tenants/{tenant_id}/users/{user_id}/conversations")
-def dashboard_user_conversations(tenant_id: str, user_id: str):
+def dashboard_user_conversations(tenant_id: str, user_id: str, background_tasks: BackgroundTasks):
     from . import dashboard
 
     try:
-        return {"items": dashboard.user_conversations(store, tenant_id, user_id)}
+        items = dashboard.user_conversations(store, tenant_id, user_id)
     except Exception as exc:  # noqa: BLE001
         return problem_response(503, "Chat DB unavailable", type(exc).__name__)
+
+    # Lazy analyse: kick off un-analysed ones in the background and mark them 'analysing'.
+    pending = [it["conversation_id"] for it in items if it["status"] == "pending"]
+    if settings.lazy_analyze and pending:
+        store.mark_analyzing(pending)
+        background_tasks.add_task(_lazy_analyze, pending)
+        for it in items:
+            if it["conversation_id"] in pending:
+                it["status"] = "analysing"
+    return {"items": items}
 
 
 @api.post("/runs")
