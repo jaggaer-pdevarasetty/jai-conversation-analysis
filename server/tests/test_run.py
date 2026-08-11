@@ -52,13 +52,13 @@ def test_failed_analysis_is_queued_and_retried_next_run():
     store = CommonStore()
     now = datetime.now(timezone.utc)
 
-    def boom(conv, run_id, ts):
+    def boom(convs, run_id, ts):
         raise RuntimeError("model unavailable")
 
-    first = run_analysis(store, CONVERSATIONS, now=now, classify=boom)
+    first = run_analysis(store, CONVERSATIONS, now=now, analyze_batch=boom)
     assert first.failed == len(CONVERSATIONS)
     assert store.unanalysed_count() == len(CONVERSATIONS)  # AC-9 visible
 
-    second = run_analysis(store, CONVERSATIONS, now=now)  # default analyzer succeeds
+    second = run_analysis(store, CONVERSATIONS, now=now)  # default rules batch succeeds
     assert second.analysed == len(CONVERSATIONS)
     assert store.unanalysed_count() == 0

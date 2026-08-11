@@ -21,7 +21,18 @@ requires **OAuth2 via a service account / ADC** plus **project** and **location*
 - Corporate proxy/CA (Zscaler) handled by **env only** (`REQUESTS_CA_BUNDLE`, `HTTPS_PROXY`);
   TLS verification is never disabled.
 
+## Update (2026-08-11): dynamic output + batching
+- **Dynamic, not static.** The model now returns, PER conversation, a **customized
+  `recommended_next_step`**, **`confidence`**, and a **`rationale`** grounded in the actual
+  transcript — replacing the per-category lookup + feedback heuristic. (`resolved` →
+  "No action needed." by convention.)
+- **Batched.** Up to `BATCH_SIZE` (default 10) conversations per Vertex call → N
+  conversations cost ~N/BATCH_SIZE calls. Verified: 50 conversations = **5 calls** (was 50).
+- Run flow refactored to a **batch analyzer** (`analyze_batch`); a group whose call fails is
+  omitted → those conversations are retried next run (AC-9); a per-conversation parse issue
+  falls back to the deterministic label.
+
 ## Consequences
 - To enable real classification you must set `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`,
   and `GOOGLE_APPLICATION_CREDENTIALS` (SA with **Vertex AI User**). An API key alone won't work.
-- Accuracy (≥85%, resolved-mislabel hard gate) is validated by the eval harness (next), not assumed.
+- Accuracy (≥85%, resolved-mislabel hard gate) is validated by the eval harness, not assumed.

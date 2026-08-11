@@ -70,7 +70,7 @@ def load_from_chatdb(limit: int | None = None, engine=None) -> list[Conversation
             usage = (
                 c.execute(
                     text(
-                        f'select message_id, total_input_tokens, total_output_tokens '
+                        f'select message_id, total_input_tokens, total_output_tokens, elapsed_seconds '
                         f'from "{sch}".token_usage where message_id::text in :mids'
                     ).bindparams(bindparam("mids", expanding=True)),
                     {"mids": mids},
@@ -111,7 +111,13 @@ def load_from_chatdb(limit: int | None = None, engine=None) -> list[Conversation
                     input_tokens=(u["total_input_tokens"] if u else None) or m["input_tokens"],
                     output_tokens=(u["total_output_tokens"] if u else None) or m["output_tokens"],
                     prompt_tokens=(u["total_input_tokens"] if u else None) or m["input_tokens"],
-                    ttft_ms=None,  # TTFT is not stored in the chat DB → unavailable (AC-7)
+                    # Chat DB has no true TTFT; use real response latency (elapsed_seconds→ms)
+                    # from token_usage, else the message latency column; else unavailable (AC-7).
+                    ttft_ms=(
+                        int(u["elapsed_seconds"] * 1000)
+                        if u and u.get("elapsed_seconds") is not None
+                        else m["latency"]
+                    ),
                 )
             )
             fb = fb_by_msg.get(mid)

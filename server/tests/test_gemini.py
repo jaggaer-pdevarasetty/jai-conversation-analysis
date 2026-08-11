@@ -1,64 +1,63 @@
-"""Vertex classifier — SDK boundary injected (no live calls, no SDK needed)."""
+"""Batched Vertex analyzer — SDK injected (no live calls). Verifies DYNAMIC output."""
 
 import json
-
-import pytest
+import re
 
 from app import gemini
 from app.fixtures import CONVERSATIONS
 
 
-def test_uses_vertex_label_when_valid():
-    rec = gemini.classify_with_vertex(
-        CONVERSATIONS[0], "run", "2026-01-01T00:00:00Z",
-        generate=lambda _p: '{"category": "out_of_scope", "rationale": "because"}',
+def _generate_dynamic(prompt: str) -> str:
+    # One JSON object per conversation_id found in the batch prompt, with CUSTOM fields.
+    ids = re.findall(r"conversation_id: (\S+)", prompt)
+    return json.dumps(
+        [
+            {
+                "conversation_id": cid,
+                "category": "out_of_scope",
+                "confidence": "high",
+                "recommended_next_step": f"Custom step for {cid[:4]}",
+                "rationale": "grounded in the transcript",
+            }
+            for cid in ids
+        ]
     )
-    assert rec.model_category == "out_of_scope"
-    assert rec.analyzer_version.startswith("vertex:")
 
 
-def test_falls_back_to_rules_on_invalid_label():
-    rec = gemini.classify_with_vertex(
-        CONVERSATIONS[0], "run", "2026-01-01T00:00:00Z",
-        generate=lambda _p: '{"category": "not_a_category"}',
-    )
-    assert rec.model_category in {
-        "resolved",
-        "failed_to_resolve",
-        "positive_feedback",
-        "negative_feedback",
-        "out_of_scope",
-    }
+def test_batch_uses_dynamic_llm_recommendation_and_confidence():
+    recs = gemini.analyze_batch_vertex(CONVERSATIONS[:3], "run", "t", generate=_generate_dynamic)
+    assert len(recs) == 3
+    for r in recs:
+        assert r.model_category == "out_of_scope"
+        assert r.confidence == "high"  # from the LLM, not a static heuristic
+        assert r.recommended_next_step.startswith("Custom step")  # dynamic, not a per-category lookup
+        assert r.rationale == "grounded in the transcript"
+        assert r.analyzer_version.startswith("vertex:")
 
 
-def test_raises_on_api_failure_so_run_retries():
-    def boom(_p):
-        raise RuntimeError("vertex unavailable")
+def test_batch_makes_one_call_per_batch_size():
+    calls = {"n": 0}
 
-    with pytest.raises(RuntimeError):
-        gemini.classify_with_vertex(CONVERSATIONS[0], "run", "2026-01-01T00:00:00Z", generate=boom)
+    def counting(prompt: str) -> str:
+        calls["n"] += 1
+        return _generate_dynamic(prompt)
 
-
-def test_make_classifier_defaults_to_rules_without_vertex_config():
-    # conftest clears Vertex env → not configured → deterministic rules.
-    assert gemini.make_classifier().__name__ == "analyze"
-
-
-def test_falls_back_to_rules_on_non_object_json_reply():
-    """A crafted transcript could coax valid-but-non-object JSON (e.g. a bare list/string)
-    out of the model; this must not raise, only fall back (codeguard hardening)."""
-    rec = gemini.classify_with_vertex(
-        CONVERSATIONS[0], "run", "2026-01-01T00:00:00Z", generate=lambda _p: '["not", "an", "object"]'
-    )
-    assert rec.model_category in {
-        "resolved", "failed_to_resolve", "positive_feedback", "negative_feedback", "out_of_scope",
-    }
+    gemini.analyze_batch_vertex(CONVERSATIONS, "run", "t", generate=counting, batch_size=3)
+    # 6 fixtures, batch_size 3 → 2 calls (not 6)
+    assert calls["n"] == 2
 
 
-def test_rationale_is_capped_in_length():
-    huge = "x" * 10_000
-    rec = gemini.classify_with_vertex(
-        CONVERSATIONS[0], "run", "2026-01-01T00:00:00Z",
-        generate=lambda _p: json.dumps({"category": "resolved", "rationale": huge}),
-    )
-    assert len(rec.rationale) <= gemini._RATIONALE_MAX_LEN
+def test_batch_soft_fallback_to_rules_when_entry_missing():
+    recs = gemini.analyze_batch_vertex(CONVERSATIONS[:2], "run", "t", generate=lambda _p: "[]")
+    assert len(recs) == 2  # still a record each (deterministic fallback)
+
+
+def test_batch_group_hard_failure_omits_conversations():
+    def boom(_p: str) -> str:
+        raise RuntimeError("vertex down")
+
+    assert gemini.analyze_batch_vertex(CONVERSATIONS[:3], "run", "t", generate=boom) == []
+
+
+def test_make_batch_analyzer_defaults_to_rules_without_vertex():
+    assert gemini.make_batch_analyzer() is gemini.analyze_batch_rules

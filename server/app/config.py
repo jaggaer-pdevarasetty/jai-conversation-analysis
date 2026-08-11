@@ -45,6 +45,8 @@ class Settings:
     vertex_project: str = os.getenv("GOOGLE_CLOUD_PROJECT", "")
     vertex_location: str = os.getenv("GOOGLE_CLOUD_LOCATION", "")
     gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    # Conversations classified per LLM call (batching cuts API calls ~batch_size-fold).
+    batch_size: int = int(os.getenv("BATCH_SIZE", "10"))
 
     # Common store: "memory" (default, for tests/no-DB) or "sql" (Postgres — ADR-0009).
     # SQLite is intentionally NOT supported for storing data; use Postgres (podman/Docker).

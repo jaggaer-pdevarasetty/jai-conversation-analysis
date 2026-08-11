@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from .config import settings
 from .domain.models import CATEGORIES, AnalysisRecord, CommonConversation, Conversation
-from .gemini import make_classifier
+from .gemini import make_batch_analyzer
 from .problem import problem_response
 from .run import run_analysis
 from .sources import load_conversations
@@ -44,7 +44,7 @@ def _load_source() -> list[Conversation]:
 # run over the configured source (fixtures | langsmith). In production a scheduler triggers
 # run_analysis every 4h; classification uses Vertex when configured, else deterministic rules.
 store = make_store()
-latest_run = run_analysis(store, _load_source(), classify=make_classifier())
+latest_run = run_analysis(store, _load_source(), analyze_batch=make_batch_analyzer())
 
 
 def require_reviewer(x_roles: str | None = Header(default=None)) -> None:
@@ -171,7 +171,7 @@ def latest_run_summary():
 def trigger_run():
     """Trigger a run (scheduler / reviewer). Re-analyses eligible, not-yet-analysed convs."""
     global latest_run
-    latest_run = run_analysis(store, _load_source(), classify=make_classifier())
+    latest_run = run_analysis(store, _load_source(), analyze_batch=make_batch_analyzer())
     return asdict(latest_run) | {"unanalysed": latest_run.unanalysed}
 
 

@@ -12,14 +12,20 @@ from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 
 from .deidentify import deidentify
-from .domain.analyze import analyze as default_analyze
 from .domain.models import AnalysisRecord, Conversation, RunSummary
 from .store import CommonStore
 
 INACTIVITY = timedelta(minutes=5)
 
-# A classifier maps (conversation, run_id, now_iso) -> AnalysisRecord; may raise.
-Classifier = Callable[[Conversation, str, str], AnalysisRecord]
+# A batch analyzer maps a list of conversations -> records; conversations whose analysis
+# hard-failed are omitted from the result (so the run marks them for retry). May raise.
+BatchAnalyzer = Callable[[list[Conversation], str, str], list[AnalysisRecord]]
+
+
+def _rules_batch(convs: list[Conversation], run_id: str, now: str) -> list[AnalysisRecord]:
+    from .domain.analyze import analyze
+
+    return [analyze(c, run_id, now) for c in convs]
 
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -50,26 +56,37 @@ def run_analysis(
     store: CommonStore,
     conversations: list[Conversation],
     now: datetime | None = None,
-    classify: Classifier = default_analyze,
+    analyze_batch: BatchAnalyzer = _rules_batch,
 ) -> RunSummary:
     now = now or datetime.now(timezone.utc)
     run_id = f"run_{uuid.uuid4().hex[:8]}"
     started = now.isoformat()
-    analysed = failed = skipped = 0
+    skipped = 0
 
+    # Eligible (inactive >=5m, AC-11) and not already analysed (idempotent).
+    eligible: list[Conversation] = []
     for conv in conversations:
         if not is_eligible(conv, now):
-            skipped += 1  # picked up by a later run (AC-11)
+            skipped += 1
             continue
-        if store.is_analysed(conv.id):
-            continue  # idempotent
+        if not store.is_analysed(conv.id):
+            eligible.append(conv)
+
+    analysed = failed = 0
+    if eligible:
         try:
-            record = classify(conv, run_id, now.isoformat())
-            store.upsert(record, deidentify(conv))
-            analysed += 1
+            records = analyze_batch(eligible, run_id, now.isoformat())
         except Exception:
-            store.mark_failed(conv.id)  # retried next run; count stays visible (AC-9)
-            failed += 1
+            records = []  # total failure → all retried next run (AC-9)
+        by_id = {r.conversation_id: r for r in records}
+        for conv in eligible:
+            record = by_id.get(conv.id)
+            if record is None:
+                store.mark_failed(conv.id)  # retried next run; count stays visible (AC-9)
+                failed += 1
+            else:
+                store.upsert(record, deidentify(conv))
+                analysed += 1
 
     return RunSummary(
         run_id=run_id,
