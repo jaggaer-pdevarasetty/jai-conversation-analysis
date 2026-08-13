@@ -57,7 +57,19 @@ def _sweep() -> None:
 
 
 scheduler = None
+region_health: list[dict] = []  # per-region connectivity, checked once at startup
 if settings.source == "chatdb":
+    # Test EVERY configured region before serving: connect + verify the 4 required tables.
+    # We log and continue (a bad/permission-denied region must not crash the app or leak data).
+    from .chatdb import check_regions
+
+    region_health = check_regions()
+    for h in region_health:
+        state = "OK " + str(h["counts"]) if h["ok"] else f"UNREACHABLE ({h['error']})"
+        print(f"[startup] region '{h['label']}' {h['host']}/{h['db']}.{h['schema']}: {state}", flush=True)
+    if not any(h["ok"] for h in region_health):
+        print("[startup][warn] NO region is readable — dashboards will be empty until fixed.", flush=True)
+
     analysis_queue.start()
     try:
         _sweep()  # initial full-coverage sweep at boot (non-blocking)
@@ -80,6 +92,17 @@ def require_reviewer(x_roles: str | None = Header(default=None)) -> None:
     roles = {r.strip().lower() for r in (x_roles or "").split(",")}
     if "reviewer" not in roles:
         raise HTTPException(status_code=403, detail="Reviewer role required")
+
+
+def _bad_region(region: str | None):
+    """Reject an unknown region label (strict — prevents accidental cross-region leakage)."""
+    if region is None:
+        return None
+    from .chatdb import region_labels
+
+    if region not in region_labels():
+        return problem_response(400, "Invalid region", f"Unknown region: {region}")
+    return None
 
 
 def _metrics(record: AnalysisRecord) -> dict:
@@ -109,9 +132,29 @@ def health() -> dict[str, str]:
 api = APIRouter(prefix="/api/analysis", dependencies=[Depends(require_reviewer)])
 
 
+@api.get("/regions")
+def list_regions():
+    """Regions available for the UI dropdown, with startup reachability + table counts."""
+    from .chatdb import configured_regions
+
+    health = {h["label"]: h for h in region_health}
+    return {
+        "items": [
+            {
+                "label": r.label,
+                "reachable": health.get(r.label, {}).get("ok"),
+                "counts": health.get(r.label, {}).get("counts", {}),
+                "error": health.get(r.label, {}).get("error"),
+            }
+            for r in configured_regions()
+        ]
+    }
+
+
 @api.get("/conversations")
 def list_conversations(
     category: str | None = Query(default=None),
+    region: str | None = Query(default=None),
     query: str | None = Query(default=None, max_length=200),
     confidence: str | None = Query(default=None),
     review_state: str | None = Query(default=None),
@@ -121,6 +164,8 @@ def list_conversations(
 ):
     if category is not None and category not in CATEGORIES:
         return problem_response(400, "Invalid category", f"Unknown category: {category}")
+    if (bad := _bad_region(region)) is not None:
+        return bad
     if confidence is not None and confidence not in {"high", "medium", "low"}:
         return problem_response(400, "Invalid confidence", f"Unknown confidence: {confidence}")
     if review_state is not None and review_state not in {"attention", "feedback", "overridden", "missing_telemetry"}:
@@ -128,7 +173,7 @@ def list_conversations(
     if sort not in {"attention", "newest", "confidence", "slowest", "tokens"}:
         return problem_response(400, "Invalid sort", f"Unknown sort: {sort}")
 
-    records = store.list(category=category)  # type: ignore[arg-type]
+    records = store.list(category=category, region=region)  # type: ignore[arg-type]
     items = [_list_item(record, store.get_conversation(record.conversation_id)) for record in records]
     text_query = (query or "").strip().lower()
     if text_query:
@@ -169,9 +214,10 @@ def list_conversations(
     total = len(items)
     return {
         "items": items[offset : offset + limit],
-        "counts": store.count_by_category(),
+        "counts": store.count_by_category(region=region),
         "total": total,
         "unanalysed": store.unanalysed_count(),
+        "region": region,
         "limit": limit,
         "offset": offset,
     }
@@ -236,6 +282,7 @@ _NEGATIVE_CATEGORIES = {"negative_feedback", "failed_to_resolve"}
 @api.get("/feedback")
 def feedback_conversations(
     scope: str = Query(default="thumbs", pattern="^(thumbs|outcomes|all)$"),
+    region: str | None = Query(default=None),
 ):
     """Feedback / negative-signal conversations, rich row per conversation for a reviewer table.
 
@@ -244,8 +291,10 @@ def feedback_conversations(
         negative_feedback) even without a thumb — the large 'went badly' set.
     scope=all: union of both.
     """
+    if (bad := _bad_region(region)) is not None:
+        return bad
     items = []
-    for record in store.list():
+    for record in store.list(region=region):
         conv = store.get_conversation(record.conversation_id)
         has_thumbs = conv is not None and conv.feedback.rating is not None
         neg_outcome = record.category in _NEGATIVE_CATEGORIES
@@ -365,11 +414,13 @@ def latest_run_summary():
 
 # ── Admin dashboard: tenant → user → conversation drill-down (authorised view) ──
 @api.get("/dashboard/overview")
-def dashboard_overview():
+def dashboard_overview(region: str | None = Query(default=None)):
     from . import dashboard
 
+    if (bad := _bad_region(region)) is not None:
+        return bad
     try:
-        return dashboard.overview(store)
+        return dashboard.overview(store, region=region)
     except Exception as exc:  # noqa: BLE001
         return problem_response(503, "Chat DB unavailable", type(exc).__name__)
 
@@ -385,25 +436,29 @@ def _pooled_block():
 
 
 @api.get("/dashboard/tenants")
-def dashboard_tenants():
+def dashboard_tenants(region: str | None = Query(default=None)):
     from . import dashboard
 
     if (blocked := _pooled_block()) is not None:
         return blocked
+    if (bad := _bad_region(region)) is not None:
+        return bad
     try:
-        return {"items": dashboard.tenants()}
+        return {"items": dashboard.tenants(region=region), "region": region}
     except Exception as exc:  # noqa: BLE001
         return problem_response(503, "Chat DB unavailable", type(exc).__name__)
 
 
 @api.get("/dashboard/tenants/{tenant_id}/users")
-def dashboard_users(tenant_id: str):
+def dashboard_users(tenant_id: str, region: str | None = Query(default=None)):
     from . import dashboard
 
     if (blocked := _pooled_block()) is not None:
         return blocked
+    if (bad := _bad_region(region)) is not None:
+        return bad
     try:
-        return {"items": dashboard.users(tenant_id)}
+        return {"items": dashboard.users(tenant_id, region=region), "region": region}
     except Exception as exc:  # noqa: BLE001
         return problem_response(503, "Chat DB unavailable", type(exc).__name__)
 
@@ -412,6 +467,7 @@ def dashboard_users(tenant_id: str):
 def dashboard_user_conversations(
     tenant_id: str,
     user_id: str,
+    region: str | None = Query(default=None),
     limit: int = Query(default=25, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ):
@@ -419,8 +475,10 @@ def dashboard_user_conversations(
 
     if (blocked := _pooled_block()) is not None:
         return blocked
+    if (bad := _bad_region(region)) is not None:
+        return bad
     try:
-        items, total = dashboard.user_conversations(store, tenant_id, user_id, limit, offset)
+        items, total = dashboard.user_conversations(store, tenant_id, user_id, limit, offset, region=region)
     except Exception as exc:  # noqa: BLE001
         return problem_response(503, "Chat DB unavailable", type(exc).__name__)
 
@@ -444,19 +502,23 @@ def queue_stats(
 
 
 @api.get("/stats")
-def operational_stats():
+def operational_stats(region: str | None = Query(default=None)):
     """Operational metrics: throughput, queue health, LLM vs rules, override + token totals."""
     from . import reporting
 
-    return reporting.operational_stats(store, analysis_queue, latest_run)
+    if (bad := _bad_region(region)) is not None:
+        return bad
+    return reporting.operational_stats(store, analysis_queue, latest_run, region=region)
 
 
 @api.get("/report")
-def product_report():
+def product_report(region: str | None = Query(default=None)):
     """Business report (J1-93353): category mix, high-frequency issues, new use-cases."""
     from . import reporting
 
-    return reporting.product_report(store)
+    if (bad := _bad_region(region)) is not None:
+        return bad
+    return reporting.product_report(store, region=region)
 
 
 @api.post("/runs")

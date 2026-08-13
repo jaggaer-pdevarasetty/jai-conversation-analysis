@@ -74,15 +74,21 @@ class CommonStore:
     def get_conversation(self, conversation_id: str) -> CommonConversation | None:
         return self._conversations.get(conversation_id)
 
-    def list(self, category: Category | None = None) -> list[AnalysisRecord]:
+    def list(
+        self, category: Category | None = None, region: str | None = None
+    ) -> list[AnalysisRecord]:
         items = list(self._analyses.values())
         if category:
             items = [r for r in items if r.category == category]
+        if region:  # strict region filter — no cross-region leakage
+            items = [r for r in items if r.region == region]
         return sorted(items, key=lambda r: r.analyzed_at)
 
-    def count_by_category(self) -> dict[str, int]:
+    def count_by_category(self, region: str | None = None) -> dict[str, int]:
         counts: dict[str, int] = {c: 0 for c in CATEGORIES}
         for r in self._analyses.values():
+            if region and r.region != region:
+                continue
             counts[r.category] += 1
         return counts
 

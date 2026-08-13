@@ -135,7 +135,7 @@ def test_queue_summary_exposes_live_items():
 def test_user_conversations_endpoint_paginates(monkeypatch):
     monkeypatch.setattr(
         "app.dashboard.user_conversations",
-        lambda store, tenant_id, user_id, limit, offset: ([], 42),
+        lambda store, tenant_id, user_id, limit, offset, region=None: ([], 42),
     )
     body = client.get(
         "/api/analysis/dashboard/tenants/t1/users/u1/conversations",

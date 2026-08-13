@@ -22,6 +22,7 @@ from sqlalchemy import (
     delete,
     func,
     select,
+    text,
 )
 
 from .domain.category import recommended_next_step
@@ -43,6 +44,7 @@ _analysis = Table(
     "analysis", _metadata,
     Column("conversation_id", String, primary_key=True),
     Column("category", String, index=True),  # effective category (for filter/count)
+    Column("region", String, index=True),  # source region (us/eu/uk) — for filter/count
     Column("data", JSON),
 )
 _conversation = Table(
@@ -63,7 +65,12 @@ _analyze_event = Table(
 
 
 def _rec_to_row(r: AnalysisRecord) -> dict:
-    return {"conversation_id": r.conversation_id, "category": r.category, "data": asdict(r)}
+    return {
+        "conversation_id": r.conversation_id,
+        "category": r.category,
+        "region": r.region,
+        "data": asdict(r),
+    }
 
 
 def _row_to_rec(data: dict) -> AnalysisRecord:
@@ -91,6 +98,12 @@ class SqlResultStore:
     def __init__(self, url: str) -> None:
         self._engine = create_engine(url, future=True)
         _metadata.create_all(self._engine)
+        # Idempotent migration: add `region` to a pre-existing analysis table (Postgres).
+        with self._engine.begin() as conn:
+            try:
+                conn.execute(text("ALTER TABLE analysis ADD COLUMN IF NOT EXISTS region VARCHAR"))
+            except Exception:  # backend without IF NOT EXISTS / column already present
+                pass
         self._analyzing: set[str] = set()  # transient runtime state (not persisted)
 
     # in-progress bookkeeping (lazy analyse) ----------------------------------
@@ -152,20 +165,25 @@ class SqlResultStore:
             ).first()
         return _row_to_conv(row[0]) if row else None
 
-    def list(self, category: Category | None = None) -> list[AnalysisRecord]:
+    def list(
+        self, category: Category | None = None, region: str | None = None
+    ) -> list[AnalysisRecord]:
         stmt = select(_analysis.c.data)
         if category:
             stmt = stmt.where(_analysis.c.category == category)
+        if region:  # strict region filter — no cross-region leakage
+            stmt = stmt.where(_analysis.c.region == region)
         with self._engine.begin() as conn:
             rows = conn.execute(stmt).all()
         return sorted((_row_to_rec(r[0]) for r in rows), key=lambda r: r.analyzed_at)
 
-    def count_by_category(self) -> dict[str, int]:
+    def count_by_category(self, region: str | None = None) -> dict[str, int]:
         counts: dict[str, int] = {c: 0 for c in CATEGORIES}
+        stmt = select(_analysis.c.category, func.count()).group_by(_analysis.c.category)
+        if region:
+            stmt = stmt.where(_analysis.c.region == region)
         with self._engine.begin() as conn:
-            for cat, n in conn.execute(
-                select(_analysis.c.category, func.count()).group_by(_analysis.c.category)
-            ).all():
+            for cat, n in conn.execute(stmt).all():
                 if cat in counts:
                     counts[cat] = n
         return counts

@@ -45,3 +45,26 @@ def test_report_breaks_down_by_region_and_tenant():
     rep = product_report(store)
     assert rep["by_region"]["us"]["issues"] == 2
     assert rep["top_tenants_by_issues"][0] == {"tenant_id": "1", "region": "us", "issues": 2}
+
+
+def test_store_region_filter_is_strict():
+    store = CommonStore()
+    for cid, reg in [("x", "us"), ("y", "uk")]:
+        conv = _conv(cid, reg, "1", replied=True)
+        store.upsert(analyze(conv, "run"), deidentify(conv))
+    assert {r.conversation_id for r in store.list(region="us")} == {"x"}
+    assert {r.conversation_id for r in store.list(region="uk")} == {"y"}
+    assert sum(store.count_by_category(region="us").values()) == 1
+    # no region → everything (no loss)
+    assert {r.conversation_id for r in store.list()} == {"x", "y"}
+
+
+def test_api_rejects_unknown_region_and_lists_regions():
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    client = TestClient(app)
+    assert client.get("/api/analysis/regions").status_code == 200
+    # unknown region label → 400 (strict; prevents cross-region leakage)
+    assert client.get("/api/analysis/conversations", params={"region": "atlantis"}).status_code == 400

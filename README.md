@@ -87,7 +87,7 @@ cd ..
 ```bash
 cp server/.env.example .env                 # then edit .env
 ```
-Minimum to see **real data**:
+Minimum to see **real data** (single region):
 ```
 SOURCE=chatdb
 CHAT_DB_URL=postgresql+psycopg://<user>:<pass>@<host>:5432/<db>
@@ -99,6 +99,20 @@ RESULTS_DB_URL=postgresql+psycopg://jai:jai@localhost:5433/analysis
 GOOGLE_CLOUD_PROJECT=<gcp-project>
 GOOGLE_CLOUD_LOCATION=us-central1
 ```
+Multi‑region (pull US + EU + UK together, each record tagged with its region):
+```
+SOURCE=chatdb
+REGIONS=us,eu,uk
+REGION_US_CHAT_DB_URL=postgresql+psycopg://<user>:<pass>@<us-host>:5432/<db>
+REGION_EU_CHAT_DB_URL=postgresql+psycopg://<user>:<pass>@<eu-host>:5432/<db>
+REGION_UK_CHAT_DB_URL=postgresql+psycopg://<user>:<pass>@<uk-host>:5432/<db>
+CHAT_DB_SCHEMA=jai_agentos_schema_uit       # shared fallback schema for all regions
+```
+With `REGIONS` set, `CHAT_DB_URL` is optional/unused. There is **no** `RESULT_STORE`/SQLite
+setting — results are stored only in Postgres. At startup the server **tests every region**
+(connect + verify the 4 tables) and logs each as OK/UNREACHABLE; a bad region never crashes
+boot or leaks another region's data.
+
 No `.env`? The app runs on **built‑in fixtures** (`SOURCE=fixtures`) so you can develop with zero credentials.
 
 ### 4) (Optional) Real Gemini via Vertex AI
@@ -156,10 +170,14 @@ Client: `NEXT_PUBLIC_API_BASE` (default `http://localhost:8000`).
 
 ## Key API endpoints
 
+Most read endpoints accept `?region=us|eu|uk` to scope results to one region (strict — no
+cross‑region leakage); omit it for all regions.
+
 | Method · Path | What |
 |---|---|
 | `GET /health` | liveness |
-| `GET /api/analysis/conversations` | pooled list + per‑category counts |
+| `GET /api/analysis/regions` | configured regions + reachability + table counts (for the UI dropdown) |
+| `GET /api/analysis/conversations` | pooled list + per‑category counts (`?region=`) |
 | `GET /api/analysis/conversations/{id}` | full record (transcript, analysis, deep, metrics, source) |
 | `POST /api/analysis/conversations/{id}/analyze` | on‑demand (re)analyse (3/day) |
 | `POST /api/analysis/conversations/{id}/override` | human category override (audited) |

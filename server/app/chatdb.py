@@ -48,9 +48,66 @@ def _engine_for(url: str, db_name: str):
     return create_engine(make_url(url).set(database=db_name), connect_args={"connect_timeout": 15})
 
 
+def configured_regions() -> list[RegionConfig]:
+    """All configured regions; falls back to the legacy single region if none are set."""
+    regs = settings.regions()
+    if regs:
+        return regs
+    primary = _primary_region()
+    return [primary] if primary.url else []
+
+
+def resolve_region(label: str | None) -> RegionConfig | None:
+    """Region by label; if no label, the first configured region (the default)."""
+    regs = configured_regions()
+    if not regs:
+        return None
+    if label:
+        return next((r for r in regs if r.label == label), None)
+    return regs[0]
+
+
 def _engine():
-    # Primary-region engine (READ-ONLY) — used by the dashboard tenant/user tree.
-    return _engine_for(settings.chat_db_url, settings.chat_db_name)
+    # Default-region engine (READ-ONLY) — used by the dashboard when no region is given.
+    r = resolve_region(None)
+    if r is None:
+        raise RuntimeError("no chat DB region configured (set REGIONS/REGION_*_CHAT_DB_URL or CHAT_DB_URL)")
+    return _engine_for(r.url, r.db_name)
+
+
+_EXPECTED_TABLES = ["conversations", "messages", "feedback", "token_usage"]
+
+
+def region_labels() -> list[str]:
+    return [r.label for r in configured_regions()]
+
+
+def check_regions() -> list[dict]:
+    """Test every configured region (READ-ONLY): connect + count the 4 required tables.
+    Never raises — returns a per-region status so startup can log/continue."""
+    out: list[dict] = []
+    for r in configured_regions():
+        u = make_url(r.url)
+        info: dict = {
+            "label": r.label, "host": u.host, "db": r.db_name, "schema": r.schema,
+            "ok": False, "error": None, "counts": {},
+        }
+        try:
+            sch = safe_schema(r.schema)
+            eng = _engine_for(r.url, r.db_name)
+            try:
+                with eng.connect() as c:
+                    for t in _EXPECTED_TABLES:
+                        info["counts"][t] = c.execute(
+                            text(f'select count(*) from "{sch}".{t}')
+                        ).scalar_one()
+                info["ok"] = True
+            finally:
+                eng.dispose()
+        except Exception as ex:  # connection / permission / missing table
+            info["error"] = f"{type(ex).__name__}: {str(ex)[:160]}"
+        out.append(info)
+    return out
 
 
 def load_one_from_chatdb(conversation_id: str, engine=None) -> Conversation | None:
@@ -80,12 +137,16 @@ def _eligible_in_region(region: RegionConfig, engine, limit: int | None) -> list
 
 
 def eligible_conversation_ids(limit: int | None = None, engine=None) -> list[str]:
-    """Eligible IDs (not deleted, inactive >= 5 min) across ALL configured regions."""
+    """Eligible IDs (not deleted, inactive >= 5 min) across ALL configured regions.
+    A region that errors (e.g. permission denied) is skipped so it can't block the others."""
     if engine is not None:
         return _eligible_in_region(_primary_region(), engine, limit)
     out: list[str] = []
-    for region in settings.regions():
-        out += _eligible_in_region(region, None, limit)
+    for region in configured_regions():
+        try:
+            out += _eligible_in_region(region, None, limit)
+        except Exception as ex:  # noqa: BLE001 - one bad region must not stop the rest
+            print(f"[warn] eligibility skipped region '{region.label}': {type(ex).__name__}", flush=True)
     return out
 
 
@@ -96,8 +157,11 @@ def load_from_chatdb(
     if engine is not None:  # explicit engine → single region (tests / dashboard helpers)
         return _load_region(_primary_region(), limit=limit, ids=ids, engine=engine)
     out: list[Conversation] = []
-    for region in settings.regions():
-        out += _load_region(region, limit=limit, ids=ids)
+    for region in configured_regions():
+        try:
+            out += _load_region(region, limit=limit, ids=ids)
+        except Exception as ex:  # noqa: BLE001 - skip an unreachable region, keep the rest
+            print(f"[warn] load skipped region '{region.label}': {type(ex).__name__}", flush=True)
     return out
 
 

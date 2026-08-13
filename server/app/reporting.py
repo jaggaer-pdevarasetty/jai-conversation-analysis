@@ -16,14 +16,15 @@ from collections import Counter
 from .store import CommonStore
 
 
-def operational_stats(store: CommonStore, queue=None, latest_run=None) -> dict:
-    records = store.list()
+def operational_stats(store: CommonStore, queue=None, latest_run=None, region: str | None = None) -> dict:
+    records = store.list(region=region)
     tokens_in = sum((r.metrics.input_tokens or 0) for r in records)
     tokens_out = sum((r.metrics.output_tokens or 0) for r in records)
     stats: dict = {
+        "region": region,
         "analysed": len(records),
         "unanalysed": store.unanalysed_count(),
-        "counts": store.count_by_category(),
+        "counts": store.count_by_category(region=region),
         "analyzers": dict(Counter(r.analyzer_version for r in records)),  # vertex vs rules
         "by_region": dict(Counter((r.region or "unknown") for r in records)),
         "overrides": sum(1 for r in records if r.override is not None),
@@ -41,11 +42,11 @@ def operational_stats(store: CommonStore, queue=None, latest_run=None) -> dict:
     return stats
 
 
-def product_report(store: CommonStore, top: int = 10) -> dict:
-    records = store.list()
+def product_report(store: CommonStore, top: int = 10, region: str | None = None) -> dict:
+    records = store.list(region=region)
     total = len(records)
     denom = total or 1
-    counts = store.count_by_category()
+    counts = store.count_by_category(region=region)
     distribution = {c: {"count": n, "pct": round(100 * n / denom, 1)} for c, n in counts.items()}
 
     # High-frequency issues: the most common recommended next steps on unresolved chats.
