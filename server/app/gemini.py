@@ -36,10 +36,18 @@ _SYSTEM = (
     "You analyse customer-support conversations. For EACH conversation below, decide:\n"
     "- category: EXACTLY ONE of resolved, failed_to_resolve, positive_feedback, "
     "negative_feedback, out_of_scope.\n"
-    "  Precedence: explicit thumbs feedback wins (positive/negative_feedback); else an "
-    "unsupported action = out_of_scope; else repeated/rage prompts or abandonment = "
-    "failed_to_resolve; else resolved. Never call a failed/out-of-scope chat resolved.\n"
-    "- confidence: high | medium | low — how sure you are.\n"
+    "  Precedence: explicit thumbs feedback wins (positive/negative_feedback); else a request "
+    "for something JAI fundamentally cannot do = out_of_scope; else repeated/rage prompts or "
+    "abandonment = failed_to_resolve; else resolved.\n"
+    "  Mark 'resolved' ONLY if JAI DIRECTLY answered the user's ACTUAL question. If JAI "
+    "declined or deflected (e.g. 'I cannot/ I'm unable to provide...'), said a resource is "
+    "outdated/unavailable, or redirected to another system/team WITHOUT actually answering the "
+    "specific question asked, that is NOT resolved -> use failed_to_resolve. Never call a "
+    "failed or out-of-scope chat resolved.\n"
+    "- confidence: high | medium | low. Use HIGH only when you are certain — normally only "
+    "when there is explicit thumbs feedback OR the user's exact question was fully and directly "
+    "answered. Use MEDIUM for partial answers, redirects/deflections, or when the specific ask "
+    "was not clearly met. Use LOW when the outcome is ambiguous or the chat is too short to tell.\n"
     "- recommended_next_step: ONE specific, actionable step for the JAI team, GROUNDED IN "
     "THIS conversation (name the actual topic/gap). For 'resolved' return exactly "
     "'No action needed.'\n"
@@ -100,6 +108,10 @@ def _record(conv: Conversation, run_id: str, now: str, p: dict | None) -> Analys
         return rules_analyze(conv, run_id, now)
     category = p["category"]
     confidence = p.get("confidence") if p.get("confidence") in ("high", "medium", "low") else "medium"
+    # Calibration: HIGH confidence requires explicit user feedback. Without a thumb the label is
+    # inferred from the transcript alone, so cap at medium (avoids over-confident 'resolved').
+    if confidence == "high" and conv.feedback.rating is None:
+        confidence = "medium"
     step = (p.get("recommended_next_step") or "").strip() or recommended_next_step(category)  # type: ignore[arg-type]
     return AnalysisRecord(
         conversation_id=conv.id,

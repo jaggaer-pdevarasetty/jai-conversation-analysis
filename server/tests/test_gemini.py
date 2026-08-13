@@ -28,12 +28,33 @@ def _generate_dynamic(prompt: str) -> str:
 def test_batch_uses_dynamic_llm_recommendation_and_confidence():
     recs = gemini.analyze_batch_vertex(CONVERSATIONS[:3], "run", "t", generate=_generate_dynamic)
     assert len(recs) == 3
-    for r in recs:
+    by_id = {r.conversation_id: r for r in recs}
+    for c in CONVERSATIONS[:3]:
+        r = by_id[c.id]
         assert r.model_category == "out_of_scope"
-        assert r.confidence == "high"  # from the LLM, not a static heuristic
         assert r.recommended_next_step.startswith("Custom step")  # dynamic, not a per-category lookup
         assert r.rationale == "grounded in the transcript"
         assert r.analyzer_version.startswith("vertex:")
+        # Calibration: the LLM said "high", but HIGH only survives with explicit feedback.
+        assert r.confidence == ("high" if c.feedback.rating is not None else "medium")
+
+
+def test_high_confidence_requires_explicit_feedback():
+    """A high-confidence label with no thumb is capped to medium (no over-confident 'resolved')."""
+    no_fb = next(c for c in CONVERSATIONS if c.feedback.rating is None)
+    with_fb = next(c for c in CONVERSATIONS if c.feedback.rating is not None)
+
+    def gen_high(prompt: str) -> str:
+        if "what_happened" in prompt:  # deep-analysis call for the feedback conversation
+            return "{}"
+        ids = re.findall(r"conversation_id: (\S+)", prompt)
+        return json.dumps(
+            [{"conversation_id": cid, "category": "resolved", "confidence": "high",
+              "recommended_next_step": "No action needed.", "rationale": "r"} for cid in ids]
+        )
+
+    assert gemini.analyze_batch_vertex([no_fb], "r", "t", generate=gen_high)[0].confidence == "medium"
+    assert gemini.analyze_batch_vertex([with_fb], "r", "t", generate=gen_high)[0].confidence == "high"
 
 
 def test_batch_makes_one_call_per_batch_size():
