@@ -25,6 +25,7 @@ def operational_stats(store: CommonStore, queue=None, latest_run=None) -> dict:
         "unanalysed": store.unanalysed_count(),
         "counts": store.count_by_category(),
         "analyzers": dict(Counter(r.analyzer_version for r in records)),  # vertex vs rules
+        "by_region": dict(Counter((r.region or "unknown") for r in records)),
         "overrides": sum(1 for r in records if r.override is not None),
         "tokens": {"input": tokens_in, "output": tokens_out, "total": tokens_in + tokens_out},
     }
@@ -60,6 +61,29 @@ def product_report(store: CommonStore, top: int = 10) -> dict:
         if r.category == "out_of_scope"
     ]
 
+    negative = {"failed_to_resolve", "negative_feedback"}
+
+    # Per-region health: total + how many went badly (which region has more issues).
+    by_region: dict[str, dict] = {}
+    for r in records:
+        reg = r.region or "unknown"
+        b = by_region.setdefault(reg, {"total": 0, "issues": 0})
+        b["total"] += 1
+        if r.category in negative:
+            b["issues"] += 1
+
+    # Which tenants have the most issues (tenant analytics — a company, not a person).
+    tenant_issues: Counter = Counter()
+    tenant_region: dict[str, str] = {}
+    for r in records:
+        if r.category in negative and r.tenant_id:
+            tenant_issues[r.tenant_id] += 1
+            tenant_region[r.tenant_id] = r.region or "unknown"
+    top_tenants = [
+        {"tenant_id": t, "region": tenant_region.get(t, "unknown"), "issues": n}
+        for t, n in tenant_issues.most_common(top)
+    ]
+
     return {
         "total_analysed": total,
         "category_distribution": distribution,
@@ -67,5 +91,7 @@ def product_report(store: CommonStore, top: int = 10) -> dict:
         "failure_rate_pct": distribution["failed_to_resolve"]["pct"],
         "top_issues": top_issues,
         "new_use_cases": new_use_cases,
+        "by_region": by_region,
+        "top_tenants_by_issues": top_tenants,
         "unanalysed": store.unanalysed_count(),
     }

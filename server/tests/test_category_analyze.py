@@ -41,7 +41,10 @@ def test_analyze_high_confidence_on_explicit_feedback():
     assert analyze(with_fb, "run").confidence == "high"
 
 
-def test_analyze_carries_no_tenant_on_common_record():
-    rec = analyze(CONVERSATIONS[0], "run")
-    assert not hasattr(rec, "tenant_id")
+def test_analyze_keeps_tenant_and_region_for_analytics():
+    # Tenant is a company (not a person) → kept for analytics; content PII is scrubbed separately.
+    conv = CONVERSATIONS[0]
+    rec = analyze(conv, "run")
+    assert rec.tenant_id == conv.tenant_id
+    assert hasattr(rec, "region")
     assert rec.category == rec.model_category  # no override yet

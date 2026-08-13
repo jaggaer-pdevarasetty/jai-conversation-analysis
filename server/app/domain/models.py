@@ -66,6 +66,7 @@ class Conversation:
     created_at: str
     messages: list[Message]
     feedback: Feedback
+    region: str = ""  # source region label (us/eu/uk) — carried through to the record
     # Hints sourced from LangSmith (router intent / frustration) in production.
     out_of_scope_intent: bool = False
     frustrated: bool = False
@@ -124,6 +125,8 @@ class AnalysisRecord:
     run_id: str
     analyzer_version: str
     analyzed_at: str
+    region: str = ""  # which regional source this came from (us/eu/uk) — for analytics
+    tenant_id: str = ""  # kept for tenant analytics (a company, not a person)
     override: Optional[Override] = None
     deep: Optional[DeepAnalysis] = None  # populated only when the conversation has feedback
 

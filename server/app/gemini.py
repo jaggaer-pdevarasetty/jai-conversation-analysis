@@ -113,6 +113,8 @@ def _record(conv: Conversation, run_id: str, now: str, p: dict | None) -> Analys
         run_id=run_id,
         analyzer_version=f"vertex:{settings.gemini_model}",
         analyzed_at=now,
+        region=conv.region,
+        tenant_id=conv.tenant_id,
     )
 
 

@@ -13,44 +13,55 @@ dropped by de-identify() (ADR-0007) before anything reaches the common store. We
 
 from __future__ import annotations
 
+import os
 import re
 from collections import defaultdict
 
 from sqlalchemy import bindparam, create_engine, text
+from sqlalchemy.engine import make_url
 
-from .config import settings
+from .config import RegionConfig, settings
 from .domain.models import Conversation, Feedback, Message
 
 _IDENT = re.compile(r"^[A-Za-z0-9_]+$")
 
 
-def safe_schema() -> str:
+def safe_schema(schema: str | None = None) -> str:
     """Whitelist the schema NAME (it's interpolated into SQL; values use bound params)."""
-    sch = settings.chat_db_schema
+    sch = schema or settings.chat_db_schema
     if not _IDENT.match(sch):
-        raise ValueError(f"invalid CHAT_DB_SCHEMA: {sch!r}")
+        raise ValueError(f"invalid schema name: {sch!r}")
     return sch
 
 
-def _engine():
-    # READ-ONLY use; connect to the real DB (chat_db_name) regardless of the URL's db part.
-    from sqlalchemy.engine import make_url
+def _primary_region() -> RegionConfig:
+    """The single/primary region (used by tests with an explicit engine + the dashboard)."""
+    return RegionConfig(
+        label=os.getenv("REGION_LABEL", "uk"),
+        url=settings.chat_db_url,
+        db_name=settings.chat_db_name,
+        schema=settings.chat_db_schema,
+    )
 
-    url = make_url(settings.chat_db_url).set(database=settings.chat_db_name)
-    return create_engine(url, connect_args={"connect_timeout": 15})
+
+def _engine_for(url: str, db_name: str):
+    return create_engine(make_url(url).set(database=db_name), connect_args={"connect_timeout": 15})
+
+
+def _engine():
+    # Primary-region engine (READ-ONLY) — used by the dashboard tenant/user tree.
+    return _engine_for(settings.chat_db_url, settings.chat_db_name)
 
 
 def load_one_from_chatdb(conversation_id: str, engine=None) -> Conversation | None:
-    """Load a single conversation by id (for on-demand analyse)."""
+    """Load a single conversation by id, across all regions (for on-demand analyse)."""
     convs = load_from_chatdb(engine=engine, ids=[conversation_id])
     return convs[0] if convs else None
 
 
-def eligible_conversation_ids(limit: int | None = None, engine=None) -> list[str]:
-    """IDs of conversations eligible for analysis: not deleted and inactive >= 5 minutes.
-    (Eligibility is enforced in the DB so we don't pull transcripts just to skip them.)"""
-    sch = safe_schema()
-    eng = engine or _engine()
+def _eligible_in_region(region: RegionConfig, engine, limit: int | None) -> list[str]:
+    sch = safe_schema(region.schema)
+    eng = engine or _engine_for(region.url, region.db_name)
     try:
         with eng.connect() as c:
             sql = (
@@ -68,12 +79,34 @@ def eligible_conversation_ids(limit: int | None = None, engine=None) -> list[str
             eng.dispose()
 
 
+def eligible_conversation_ids(limit: int | None = None, engine=None) -> list[str]:
+    """Eligible IDs (not deleted, inactive >= 5 min) across ALL configured regions."""
+    if engine is not None:
+        return _eligible_in_region(_primary_region(), engine, limit)
+    out: list[str] = []
+    for region in settings.regions():
+        out += _eligible_in_region(region, None, limit)
+    return out
+
+
 def load_from_chatdb(
     limit: int | None = None, engine=None, ids: list[str] | None = None
 ) -> list[Conversation]:
+    """Load conversations across ALL configured regions (each tagged with its region)."""
+    if engine is not None:  # explicit engine → single region (tests / dashboard helpers)
+        return _load_region(_primary_region(), limit=limit, ids=ids, engine=engine)
+    out: list[Conversation] = []
+    for region in settings.regions():
+        out += _load_region(region, limit=limit, ids=ids)
+    return out
+
+
+def _load_region(
+    region: RegionConfig, limit: int | None = None, engine=None, ids: list[str] | None = None
+) -> list[Conversation]:
     limit = limit or settings.chatdb_limit
-    sch = safe_schema()
-    eng = engine or _engine()
+    sch = safe_schema(region.schema)
+    eng = engine or _engine_for(region.url, region.db_name)
     try:
         with eng.connect() as c:
             if ids is not None:
@@ -186,6 +219,7 @@ def load_from_chatdb(
                 created_at=str(r["created_at"]) if r["created_at"] else "",
                 messages=messages,
                 feedback=conv_feedback,
+                region=region.label,  # tag the source region → flows into the analysis record
             )
         )
     return conversations

@@ -24,6 +24,16 @@ for _ca_var in ("REQUESTS_CA_BUNDLE", "SSL_CERT_FILE"):
 
 
 @dataclass(frozen=True)
+class RegionConfig:
+    """One regional chat DB (US/EU/UK). READ-ONLY source; every record is tagged with `label`."""
+
+    label: str
+    url: str
+    db_name: str
+    schema: str
+
+
+@dataclass(frozen=True)
 class Settings:
     # Chat DB — READ ONLY (SELECT). Empty in dev → analyzer runs on fixtures.
     chat_db_url: str = os.getenv("CHAT_DB_URL", "")
@@ -73,6 +83,42 @@ class Settings:
     @property
     def vertex_configured(self) -> bool:
         return bool(self.vertex_project and self.vertex_location)
+
+    def regions(self) -> "list[RegionConfig]":
+        """Configured regional chat DBs.
+
+        Multi-region: set REGIONS=us,eu,uk and, per label, REGION_US_CHAT_DB_URL /
+        REGION_US_CHAT_DB_NAME / REGION_US_CHAT_DB_SCHEMA (name/schema fall back to the
+        global CHAT_DB_NAME/CHAT_DB_SCHEMA). Single-region (legacy): just CHAT_DB_URL, labelled
+        by REGION_LABEL (default "uk").
+        """
+        labels = [x.strip() for x in os.getenv("REGIONS", "").split(",") if x.strip()]
+        if labels:
+            out: list[RegionConfig] = []
+            for label in labels:
+                u = label.upper()
+                url = os.getenv(f"REGION_{u}_CHAT_DB_URL", "")
+                if not url:
+                    continue
+                out.append(
+                    RegionConfig(
+                        label=label,
+                        url=url,
+                        db_name=os.getenv(f"REGION_{u}_CHAT_DB_NAME", self.chat_db_name),
+                        schema=os.getenv(f"REGION_{u}_CHAT_DB_SCHEMA", self.chat_db_schema),
+                    )
+                )
+            return out
+        if self.chat_db_url:  # legacy single region
+            return [
+                RegionConfig(
+                    label=os.getenv("REGION_LABEL", "uk"),
+                    url=self.chat_db_url,
+                    db_name=self.chat_db_name,
+                    schema=self.chat_db_schema,
+                )
+            ]
+        return []
 
 
 settings = Settings()
