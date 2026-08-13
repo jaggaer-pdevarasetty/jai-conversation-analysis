@@ -47,7 +47,7 @@ store = make_store()
 # and (at startup, chatdb) to give FULL coverage in the background without blocking boot.
 from .queue import AnalysisQueue  # noqa: E402
 
-analysis_queue = AnalysisQueue(store, make_batch_analyzer())
+analysis_queue = AnalysisQueue(store, make_batch_analyzer(), workers=settings.queue_workers)
 
 def _sweep() -> None:
     """Enqueue every eligible, not-yet-analysed conversation (deduped by the queue)."""

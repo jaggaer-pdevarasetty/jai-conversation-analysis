@@ -60,6 +60,9 @@ class Settings:
     gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
     # Conversations classified per LLM call (batching cuts API calls ~batch_size-fold).
     batch_size: int = int(os.getenv("BATCH_SIZE", "10"))
+    # Analysis queue worker threads (concurrency). Raise to ingest a large region faster
+    # (watch LLM rate limits); retries + dead-letter absorb transient 429s.
+    queue_workers: int = int(os.getenv("QUEUE_WORKERS", "2"))
     # On-demand (re)analyse cap per conversation per day (prevents abuse / runaway cost).
     max_analyses_per_day: int = int(os.getenv("MAX_ANALYSES_PER_DAY", "3"))
     # Lazy analyse: auto-analyse a user's un-analysed conversations when a reviewer opens them.
