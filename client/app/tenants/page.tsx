@@ -31,7 +31,7 @@ export default function TenantsPage() {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(12);
   const [error, setError] = useState<string | null>(null);
-  const { region } = useRegion();
+  const { region, loading: regionLoading } = useRegion();
 
   const load = useCallback(() => {
     setError(null);
@@ -40,8 +40,8 @@ export default function TenantsPage() {
   }, [region]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    if (!regionLoading) load();
+  }, [load, regionLoading]);
 
   const filteredTenants = useMemo(() => {
     const query = search.trim().toLowerCase();

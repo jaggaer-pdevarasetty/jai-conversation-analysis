@@ -74,6 +74,9 @@ class CommonStore:
     def get_conversation(self, conversation_id: str) -> CommonConversation | None:
         return self._conversations.get(conversation_id)
 
+    def get_conversations(self, conversation_ids: list[str]) -> dict[str, CommonConversation]:
+        return {cid: self._conversations[cid] for cid in conversation_ids if cid in self._conversations}
+
     def list(
         self, category: Category | None = None, region: str | None = None
     ) -> list[AnalysisRecord]:

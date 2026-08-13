@@ -174,7 +174,8 @@ def list_conversations(
         return problem_response(400, "Invalid sort", f"Unknown sort: {sort}")
 
     records = store.list(category=category, region=region)  # type: ignore[arg-type]
-    items = [_list_item(record, store.get_conversation(record.conversation_id)) for record in records]
+    conversations = store.get_conversations([record.conversation_id for record in records])
+    items = [_list_item(record, conversations.get(record.conversation_id)) for record in records]
     text_query = (query or "").strip().lower()
     if text_query:
         items = [
@@ -283,6 +284,12 @@ _NEGATIVE_CATEGORIES = {"negative_feedback", "failed_to_resolve"}
 def feedback_conversations(
     scope: str = Query(default="thumbs", pattern="^(thumbs|outcomes|all)$"),
     region: str | None = Query(default=None),
+    rating: str | None = Query(default=None, pattern="^(positive|negative)$"),
+    category: str | None = Query(default=None),
+    query: str | None = Query(default=None, max_length=200),
+    sort: str = Query(default="negative_first", pattern="^(negative_first|newest|oldest)$"),
+    limit: int = Query(default=10, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
 ):
     """Feedback / negative-signal conversations, rich row per conversation for a reviewer table.
 
@@ -293,9 +300,13 @@ def feedback_conversations(
     """
     if (bad := _bad_region(region)) is not None:
         return bad
+    if category is not None and category not in CATEGORIES:
+        return problem_response(400, "Invalid category", f"Unknown category: {category}")
     items = []
-    for record in store.list(region=region):
-        conv = store.get_conversation(record.conversation_id)
+    records = store.list(region=region)
+    conversations = store.get_conversations([record.conversation_id for record in records])
+    for record in records:
+        conv = conversations.get(record.conversation_id)
         has_thumbs = conv is not None and conv.feedback.rating is not None
         neg_outcome = record.category in _NEGATIVE_CATEGORIES
         if scope == "thumbs" and not has_thumbs:
@@ -325,33 +336,73 @@ def feedback_conversations(
                 "deep": deep,
             }
         )
+
+    scope_total = len(items)
+    positive = sum(1 for item in items if item["rating"] is True)
+    negative = sum(1 for item in items if item["rating"] is False)
+    negative_outcomes = sum(1 for item in items if item["category"] in _NEGATIVE_CATEGORIES)
+    deep_analysed = sum(1 for item in items if item["deep"])
+    if rating:
+        expected = rating == "positive"
+        items = [item for item in items if item["rating"] is expected]
+    if category:
+        items = [item for item in items if item["category"] == category]
+
     # enrich with source metadata (tenant/user/title/timestamps) so the UI can show a table
-    try:
-        from . import dashboard
+    def _enrich(rows):
+        try:
+            from . import dashboard
 
-        meta = dashboard.conversation_meta([it["conversation_id"] for it in items])
-    except Exception:  # noqa: BLE001 - chat DB optional
-        meta = {}
-    for it in items:
-        it.update(meta.get(it["conversation_id"], {}))
+            meta = dashboard.conversation_meta([item["conversation_id"] for item in rows], region=region)
+        except Exception:  # noqa: BLE001 - chat DB optional
+            meta = {}
+        for item in rows:
+            item.update(meta.get(item["conversation_id"], {}))
 
-    def _rank(it) -> int:  # thumbs-down first, then negative outcomes, then thumbs-up, then rest
-        if it["rating"] is False:
+    text_query = (query or "").strip().lower()
+    if text_query:
+        _enrich(items)
+        items = [
+            item for item in items
+            if any(
+                text_query in str(item.get(field) or "").lower()
+                for field in (
+                    "conversation_id", "comment", "title", "tenant_name", "user_name",
+                    "recommended_next_step", "why_it_happened",
+                )
+            )
+        ]
+
+    def _rank(item) -> int:  # thumbs-down first, then negative outcomes, then thumbs-up, then rest
+        if item["rating"] is False:
             return 0
-        if it["category"] in _NEGATIVE_CATEGORIES:
+        if item["category"] in _NEGATIVE_CATEGORIES:
             return 1
-        if it["rating"] is True:
+        if item["rating"] is True:
             return 2
         return 3
 
-    items.sort(key=_rank)
+    if sort == "newest":
+        items.sort(key=lambda item: item["analyzed_at"] or "", reverse=True)
+    elif sort == "oldest":
+        items.sort(key=lambda item: item["analyzed_at"] or "")
+    else:
+        items.sort(key=_rank)
+    total = len(items)
+    page = items[offset : offset + limit]
+    if not text_query:
+        _enrich(page)
     return {
-        "items": items,
-        "total": len(items),
+        "items": page,
+        "total": total,
+        "scope_total": scope_total,
         "scope": scope,
-        "positive": sum(1 for it in items if it["rating"] is True),  # thumbs-up (back-compat)
-        "negative": sum(1 for it in items if it["rating"] is False),  # thumbs-down (back-compat)
-        "negative_outcomes": sum(1 for it in items if it["category"] in _NEGATIVE_CATEGORIES),
+        "positive": positive,
+        "negative": negative,
+        "negative_outcomes": negative_outcomes,
+        "deep_analysed": deep_analysed,
+        "limit": limit,
+        "offset": offset,
     }
 
 

@@ -1,5 +1,7 @@
 """Multi-region: region tag flows source → record → reporting; config parses REGIONS."""
 
+from types import SimpleNamespace
+
 from app import config
 from app.deidentify import deidentify
 from app.domain.analyze import analyze
@@ -57,6 +59,41 @@ def test_store_region_filter_is_strict():
     assert sum(store.count_by_category(region="us").values()) == 1
     # no region → everything (no loss)
     assert {r.conversation_id for r in store.list()} == {"x", "y"}
+
+
+def test_dashboard_reuses_region_engine(monkeypatch):
+    from app import dashboard
+
+    class FakeEngine:
+        def connect(self):
+            return self
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+    engines = []
+    monkeypatch.setattr(
+        dashboard,
+        "resolve_region",
+        lambda _region: SimpleNamespace(url="postgresql://example", db_name="chat", schema="chat"),
+    )
+    monkeypatch.setattr(
+        dashboard,
+        "_engine_for",
+        lambda _url, _db_name: engines.append(FakeEngine()) or engines[-1],
+    )
+    dashboard._dashboard_engine.cache_clear()
+    try:
+        with dashboard._connect("us"):
+            pass
+        with dashboard._connect("us"):
+            pass
+        assert len(engines) == 1
+    finally:
+        dashboard._dashboard_engine.cache_clear()
 
 
 def test_api_rejects_unknown_region_and_lists_regions():

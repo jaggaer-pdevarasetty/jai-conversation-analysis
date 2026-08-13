@@ -45,7 +45,9 @@ def _primary_region() -> RegionConfig:
 
 
 def _engine_for(url: str, db_name: str):
-    return create_engine(make_url(url).set(database=db_name), connect_args={"connect_timeout": 15})
+    return create_engine(
+        make_url(url).set(database=db_name), connect_args={"connect_timeout": 15}, pool_pre_ping=True
+    )
 
 
 def configured_regions() -> list[RegionConfig]:

@@ -78,7 +78,7 @@ export default function UserConversationsPage() {
   const [search, setSearch] = useState("");
   const [outcome, setOutcome] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const { region } = useRegion();
+  const { region, loading: regionLoading } = useRegion();
 
   const load = useCallback(
     () => {
@@ -94,6 +94,7 @@ export default function UserConversationsPage() {
   );
 
   useEffect(() => {
+    if (regionLoading) return;
     Promise.all([fetchTenants(region), fetchTenantUsers(tenantId, region)])
       .then(([tenants, users]) => {
         setTenant(tenants.find((item) => item.tenant_id === tenantId) ?? null);
@@ -101,7 +102,7 @@ export default function UserConversationsPage() {
       })
       .catch(() => setError("The user context could not be loaded."));
     void load();
-  }, [load, tenantId, userId, region]);
+  }, [load, regionLoading, tenantId, userId, region]);
 
   // Auto-refresh while anything is still being analysed (lazy analyse in progress).
   useEffect(() => {

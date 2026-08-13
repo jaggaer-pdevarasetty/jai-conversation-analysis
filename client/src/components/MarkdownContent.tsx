@@ -111,7 +111,7 @@ export function MarkdownContent({ children }: { children: string }) {
     <Box
       sx={{
         overflowWrap: "anywhere",
-        "& > :first-child": { mt: 0 },
+        "& > :first-of-type": { mt: 0 },
         "& > :last-child": { mb: 0 },
         "& p": { my: 1, lineHeight: 1.65 },
         "& h1, & h2, & h3, & h4, & h5, & h6": { mt: 2, mb: 0.8, lineHeight: 1.3, fontWeight: 750 },

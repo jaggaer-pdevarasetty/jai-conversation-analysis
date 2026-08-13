@@ -15,6 +15,7 @@ identity, broader than the pooled area (ADR-0007 / AC-10). Keep access restricte
 from __future__ import annotations
 
 from contextlib import contextmanager
+from functools import lru_cache
 
 from sqlalchemy import bindparam, text
 
@@ -22,18 +23,19 @@ from .chatdb import _engine_for, region_labels, resolve_region, safe_schema
 from .store import CommonStore
 
 
+@lru_cache
+def _dashboard_engine(url: str, db_name: str):
+    return _engine_for(url, db_name)
+
+
 @contextmanager
 def _connect(region: str | None):
-    """A connection + validated schema for one region; disposes the engine after use."""
+    """A connection + validated schema for one region."""
     r = resolve_region(region)
     if r is None:
         raise RuntimeError("no chat DB region configured (set REGIONS/REGION_*_CHAT_DB_URL)")
-    eng = _engine_for(r.url, r.db_name)
-    try:
-        with eng.connect() as c:
-            yield c, safe_schema(r.schema)
-    finally:
-        eng.dispose()
+    with _dashboard_engine(r.url, r.db_name).connect() as c:
+        yield c, safe_schema(r.schema)
 
 
 def overview(store: CommonStore, region: str | None = None) -> dict:

@@ -30,7 +30,7 @@ import {
   Typography,
 } from "@mui/material";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CATEGORIES, fetchFeedback, type FeedbackItem, type FeedbackListResponse } from "../../src/services/analysisApi";
 import { CATEGORY_META, CategoryChip } from "../../src/components/CategoryChip";
 import { useRegion } from "../../src/components/RegionContext";
@@ -51,47 +51,44 @@ function tokenTotal(item: FeedbackItem): string {
 export default function FeedbackPage() {
   const [data, setData] = useState<FeedbackListResponse | null>(null);
   const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
   const [rating, setRating] = useState("");
   const [category, setCategory] = useState("");
   const [sort, setSort] = useState("negative_first");
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [error, setError] = useState<string | null>(null);
-  const { region } = useRegion();
-
-  const load = useCallback(() => {
-    setError(null);
-    setData(null);
-    fetchFeedback({ region })
-      .then(setData)
-      .catch(() => setError("The explicit-feedback records could not be loaded. Check the API connection and try again."));
-  }, [region]);
+  const requestId = useRef(0);
+  const { region, loading: regionLoading } = useRegion();
 
   useEffect(() => {
-    load();
-  }, [load]);
+    const timer = setTimeout(() => setQuery(search.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
 
-  const filteredItems = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    const items = (data?.items ?? []).filter((item) =>
-      (!rating || (rating === "positive" ? item.rating : !item.rating)) &&
-      (!category || item.category === category) &&
-      (!query || [
-        item.conversation_id,
-        item.comment,
-        item.title,
-        item.tenant_name,
-        item.user_name,
-        item.recommended_next_step,
-        item.why_it_happened,
-      ].some((value) => String(value ?? "").toLowerCase().includes(query))),
-    );
-    return [...items].sort((a, b) => {
-      if (sort === "newest") return (b.analyzed_at ?? "").localeCompare(a.analyzed_at ?? "");
-      if (sort === "oldest") return (a.analyzed_at ?? "").localeCompare(b.analyzed_at ?? "");
-      return Number(a.rating) - Number(b.rating);
-    });
-  }, [category, data, rating, search, sort]);
+  const load = useCallback(() => {
+    const currentRequest = ++requestId.current;
+    setError(null);
+    fetchFeedback({
+      region,
+      rating,
+      category,
+      query,
+      sort,
+      limit: rowsPerPage,
+      offset: page * rowsPerPage,
+    })
+      .then((result) => {
+        if (currentRequest === requestId.current) setData(result);
+      })
+      .catch(() => {
+        if (currentRequest === requestId.current) setError("The explicit-feedback records could not be loaded. Check the API connection and try again.");
+      });
+  }, [category, page, query, rating, region, rowsPerPage, sort]);
+
+  useEffect(() => {
+    if (!regionLoading) load();
+  }, [load, regionLoading]);
 
   if (error) {
     return <Alert severity="error" action={<Button color="inherit" onClick={load}>Try again</Button>}><AlertTitle>Feedback unavailable</AlertTitle>{error}</Alert>;
@@ -101,15 +98,18 @@ export default function FeedbackPage() {
     return <Stack spacing={2.5} aria-label="Loading feedback"><Skeleton variant="rounded" height={120} /><Skeleton variant="rounded" height={130} /><Skeleton variant="rounded" height={440} /></Stack>;
   }
 
-  const positive = data.positive ?? data.items.filter((item) => item.rating).length;
-  const negative = data.negative ?? data.items.filter((item) => !item.rating).length;
-  const negativeRate = data.total ? Math.round((negative / data.total) * 100) : 0;
-  const deepCoverage = data.total ? Math.round((data.items.filter((item) => item.deep).length / data.total) * 100) : 0;
-  const visibleItems = filteredItems.slice(page * rowsPerPage, (page + 1) * rowsPerPage);
+  const positive = data.positive;
+  const negative = data.negative;
+  const scopeTotal = data.scope_total ?? data.total;
+  const deepAnalysed = data.deep_analysed ?? data.items.filter((item) => item.deep).length;
+  const negativeRate = scopeTotal ? Math.round((negative / scopeTotal) * 100) : 0;
+  const deepCoverage = scopeTotal ? Math.round((deepAnalysed / scopeTotal) * 100) : 0;
+  const visibleItems = data.limit === undefined ? data.items.slice(page * rowsPerPage, (page + 1) * rowsPerPage) : data.items;
   const hasFilters = Boolean(search || rating || category || sort !== "negative_first");
 
   function clearFilters() {
     setSearch("");
+    setQuery("");
     setRating("");
     setCategory("");
     setSort("negative_first");
@@ -137,7 +137,7 @@ export default function FeedbackPage() {
       )}
 
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", xl: "repeat(4, 1fr)" }, gap: 2 }}>
-        <StatCard label="Explicit ratings" value={data.total.toLocaleString()} helper="Feedback conversations currently available" icon={<ChatBubbleOutlineRoundedIcon />} />
+        <StatCard label="Explicit ratings" value={scopeTotal.toLocaleString()} helper="Feedback conversations currently available" icon={<ChatBubbleOutlineRoundedIcon />} />
         <StatCard label="Negative feedback" value={negative.toLocaleString()} helper={`${negativeRate}% of explicit ratings`} icon={<ThumbDownAltRoundedIcon />} tone="#C43D4B" />
         <StatCard label="Positive feedback" value={positive.toLocaleString()} helper="Confirmed positive experiences" icon={<ThumbUpAltRoundedIcon />} tone="#16815D" />
         <StatCard label="Deep analysis coverage" value={`${deepCoverage}%`} helper="Records with root-cause guidance" icon={<InsightsRoundedIcon />} tone="#6B55B5" />
@@ -173,7 +173,7 @@ export default function FeedbackPage() {
         <Box sx={{ px: 2.5, py: 2, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, borderBottom: "1px solid", borderColor: "divider" }}>
           <Box>
             <Typography variant="h3">Feedback records</Typography>
-            <Typography variant="body2" color="text.secondary">{filteredItems.length} matching {filteredItems.length === 1 ? "conversation" : "conversations"}</Typography>
+            <Typography variant="body2" color="text.secondary">{data.total} matching {data.total === 1 ? "conversation" : "conversations"}</Typography>
           </Box>
           {hasFilters && <Button size="small" onClick={clearFilters}>Clear filters</Button>}
         </Box>
@@ -239,7 +239,7 @@ export default function FeedbackPage() {
         </Table>
         <TablePagination
           component="div"
-          count={filteredItems.length}
+          count={data.total}
           page={page}
           rowsPerPage={rowsPerPage}
           rowsPerPageOptions={[5, 10, 25]}

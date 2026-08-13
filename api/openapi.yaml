@@ -29,6 +29,24 @@ paths:
         '200': { description: A page of analysed conversations., content: { application/json: { schema: { $ref: '#/components/schemas/ListResponse' } } } }
         '400': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
+  /api/analysis/feedback:
+    get:
+      tags: [analysis]
+      operationId: listFeedback
+      summary: List explicit feedback with server-side filtering, sorting, and pagination
+      parameters:
+        - { name: scope, in: query, required: false, schema: { type: string, enum: [thumbs, outcomes, all], default: thumbs } }
+        - { name: region, in: query, required: false, schema: { type: string } }
+        - { name: rating, in: query, required: false, schema: { type: string, enum: [positive, negative] } }
+        - { name: category, in: query, required: false, schema: { $ref: '#/components/schemas/Category' } }
+        - { name: query, in: query, required: false, schema: { type: string }, description: Search feedback, source metadata, recommendation, or conversation ID. }
+        - { name: sort, in: query, required: false, schema: { type: string, enum: [negative_first, newest, oldest], default: negative_first } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 10 } }
+        - { name: offset, in: query, required: false, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        '200': { description: A page of feedback records with unfiltered summary totals., content: { application/json: { schema: { $ref: '#/components/schemas/FeedbackListResponse' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
   /api/analysis/conversations/{conversation_id}:
     get:
       tags: [analysis]
@@ -132,6 +150,36 @@ components:
         counts: { type: object, additionalProperties: { type: integer } }
         total: { type: integer }
         unanalysed: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+    FeedbackItem:
+      type: object
+      required: [conversation_id, category, confidence, rating]
+      properties:
+        conversation_id: { type: string }
+        category: { $ref: '#/components/schemas/Category' }
+        model_category: { $ref: '#/components/schemas/Category' }
+        confidence: { $ref: '#/components/schemas/Confidence' }
+        rating: { type: [boolean, 'null'] }
+        comment: { type: [string, 'null'] }
+        recommended_next_step: { type: string }
+        rationale: { type: string }
+        why_it_happened: { type: string }
+        input_tokens: { type: [integer, 'null'] }
+        output_tokens: { type: [integer, 'null'] }
+        analyzed_at: { type: string, format: date-time }
+      additionalProperties: true
+    FeedbackListResponse:
+      type: object
+      required: [items, total, scope_total, positive, negative, negative_outcomes, deep_analysed, limit, offset]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/FeedbackItem' } }
+        total: { type: integer }
+        scope_total: { type: integer }
+        positive: { type: integer }
+        negative: { type: integer }
+        negative_outcomes: { type: integer }
+        deep_analysed: { type: integer }
         limit: { type: integer }
         offset: { type: integer }
     Message:

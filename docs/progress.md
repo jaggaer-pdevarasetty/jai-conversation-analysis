@@ -177,6 +177,20 @@ non-English handling. Working on branch **`feature/J1-93353-conversation-analysi
   columns, and category/recommendation appear only when the post-sidebar width is sufficient.
 - Frontend only: **14 jest + typecheck + lint + production build**. No server-owned files changed.
 
+## Done — execution increment 14 (frontend correctness, latency, and CI)
+- Removed the MUI SSR warning from Markdown rendering by replacing the unsafe first-child selector;
+  added a server-render regression test.
+- Region changes now persist the selection, return to `/`, and load Overview with the selected
+  region. Data pages wait for saved-region restoration instead of issuing a duplicate all-region request.
+- Removed SQL result-store N+1 reads with a bulk conversation lookup; dashboard engines now reuse
+  pooled connections. Measured bulk loading of 2,959 conversations improved from ~3.3s to ~0.12s;
+  warm overview from ~5.1s to ~1.1s and metadata from ~6.9s to ~1.8s.
+- Feedback filtering, sorting, search, and pagination moved to the API (spec first), so normal page
+  loads enrich and return only the requested rows instead of transferring the full ~458 KB dataset.
+- Fixed the GitHub gitleaks check after its action began requiring `GITHUB_TOKEN` for PR scans.
+- Green: **client 17 jest + typecheck + lint + production build; server 77 pytest, 3 skipped;
+  OpenAPI/workflow YAML valid; read-only posture guard passed**.
+
 ## Next
 1. Repopulate `analysis` from `chatdb` via Vertex + restart backend (approved) → UI shows real data.
 2. Fix `.env`: `CHAT_DB_URL` db = `jai_agentos_uit`, `CHAT_DB_SCHEMA=jai_agentos_schema_uit`, `SOURCE=chatdb`.

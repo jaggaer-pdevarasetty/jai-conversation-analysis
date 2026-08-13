@@ -135,7 +135,7 @@ export interface FeedbackItem extends ConversationSource {
   category: string;
   model_category?: string;
   confidence: string;
-  rating: boolean;
+  rating: boolean | null;
   comment: string | null;
   feedback_message_id?: string | null;
   recommended_next_step: string;
@@ -162,8 +162,11 @@ export interface FeedbackQuery {
 export interface FeedbackListResponse {
   items: FeedbackItem[];
   total: number;
+  scope_total?: number;
   positive: number;
   negative: number;
+  negative_outcomes?: number;
+  deep_analysed?: number;
   limit?: number;
   offset?: number;
 }
@@ -184,7 +187,7 @@ export async function fetchFeedbackConversation(id: string): Promise<Conversatio
 }
 
 export async function fetchFeedbackItem(id: string): Promise<FeedbackItem> {
-  const response = await fetchFeedback();
+  const response = await fetchFeedback({ query: id, limit: 1 });
   const item = response.items.find((feedback) => feedback.conversation_id === id);
   if (!item) throw new Error(`No explicit feedback for conversation ${id}`);
   return item;

@@ -1,7 +1,9 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { renderToString } from "react-dom/server";
 import type { ConversationDetail as Detail } from "../services/analysisApi";
 import { ConversationDetail } from "./ConversationDetail";
+import { MarkdownContent } from "./MarkdownContent";
 
 const record: Detail = {
   conversation_id: "abc123",
@@ -44,6 +46,16 @@ describe("ConversationDetail", () => {
     expect(screen.getByText("Settings").tagName).toBe("STRONG");
     expect(screen.getByRole("list")).toBeInTheDocument();
     expect(screen.queryByText(/\*\*Settings\*\*/)).not.toBeInTheDocument();
+  });
+
+  it("renders Markdown safely during server-side rendering", () => {
+    const consoleError = jest.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      renderToString(<MarkdownContent># Heading\n\nParagraph</MarkdownContent>);
+      expect(consoleError.mock.calls.flat().join(" ")).not.toContain(":first-child");
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it("submits a human override", async () => {

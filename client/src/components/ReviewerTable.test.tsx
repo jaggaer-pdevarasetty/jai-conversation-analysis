@@ -3,6 +3,12 @@ import userEvent from "@testing-library/user-event";
 import type { AnalysisQuery, ListItem, ListResponse } from "../services/analysisApi";
 import { ReviewerTable } from "./ReviewerTable";
 
+let mockRegionLoading = false;
+
+jest.mock("./RegionContext", () => ({
+  useRegion: () => ({ region: "us", loading: mockRegionLoading }),
+}));
+
 function response(params: AnalysisQuery = {}): ListResponse {
   const all: ListItem[] = Array.from({ length: 30 }, (_, index) => ({
     conversation_id: index === 0
@@ -45,7 +51,19 @@ import { fetchAnalysis } from "../services/analysisApi";
 const fetchAnalysisMock = fetchAnalysis as jest.MockedFunction<typeof fetchAnalysis>;
 
 describe("ReviewerTable", () => {
-  beforeEach(() => fetchAnalysisMock.mockClear());
+  beforeEach(() => {
+    mockRegionLoading = false;
+    fetchAnalysisMock.mockClear();
+  });
+
+  it("waits for the saved region before loading data", async () => {
+    mockRegionLoading = true;
+    const { rerender } = render(<ReviewerTable />);
+    expect(fetchAnalysisMock).not.toHaveBeenCalled();
+    mockRegionLoading = false;
+    rerender(<ReviewerTable />);
+    await waitFor(() => expect(fetchAnalysisMock).toHaveBeenCalledWith(expect.objectContaining({ region: "us" })));
+  });
 
   it("renders a searchable review queue by conversation ID (no tenant column)", async () => {
     render(<ReviewerTable />);

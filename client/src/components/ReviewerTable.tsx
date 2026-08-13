@@ -80,7 +80,7 @@ export function ReviewerTable() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
-  const { region } = useRegion();
+  const { region, loading: regionLoading } = useRegion();
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -91,6 +91,7 @@ export function ReviewerTable() {
   }, [search]);
 
   useEffect(() => {
+    if (regionLoading) return;
     let active = true;
     setLoading(true);
     setError(null);
@@ -120,7 +121,7 @@ export function ReviewerTable() {
     return () => {
       active = false;
     };
-  }, [category, confidence, page, query, region, reload, reviewState, rowsPerPage, sort]);
+  }, [category, confidence, page, query, region, regionLoading, reload, reviewState, rowsPerPage, sort]);
 
   const needsAttention = (counts.failed_to_resolve ?? 0) + (counts.negative_feedback ?? 0) + (counts.out_of_scope ?? 0);
   const hasFilters = Boolean(category || confidence || reviewState || search || sort !== "attention");

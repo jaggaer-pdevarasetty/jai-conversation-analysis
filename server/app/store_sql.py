@@ -165,6 +165,17 @@ class SqlResultStore:
             ).first()
         return _row_to_conv(row[0]) if row else None
 
+    def get_conversations(self, conversation_ids: list[str]) -> dict[str, CommonConversation]:
+        if not conversation_ids:
+            return {}
+        with self._engine.begin() as conn:
+            rows = conn.execute(
+                select(_conversation.c.conversation_id, _conversation.c.data).where(
+                    _conversation.c.conversation_id.in_(conversation_ids)
+                )
+            ).all()
+        return {conversation_id: _row_to_conv(data) for conversation_id, data in rows}
+
     def list(
         self, category: Category | None = None, region: str | None = None
     ) -> list[AnalysisRecord]:

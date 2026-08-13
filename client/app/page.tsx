@@ -70,7 +70,7 @@ export default function OverviewPage() {
   const [run, setRun] = useState<RunSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const { region } = useRegion();
+  const { region, loading: regionLoading } = useRegion();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -92,8 +92,8 @@ export default function OverviewPage() {
   }, [region]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (!regionLoading) void load();
+  }, [load, regionLoading]);
 
   const recent = useMemo(
     () => [...(data?.items ?? [])].sort((a, b) => (b.analyzed_at ?? "").localeCompare(a.analyzed_at ?? "")).slice(0, 5),

@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from app import main as main_module
 from app.domain.models import CATEGORIES
 from app.main import app
 
@@ -33,6 +34,29 @@ def test_list_filters_by_category():
     assert res.status_code == 200
     for item in res.json()["items"]:
         assert item["category"] == "positive_feedback"
+
+
+def test_list_bulk_loads_conversations(monkeypatch):
+    records = main_module.store.list()
+    conversations = {
+        record.conversation_id: main_module.store.get_conversation(record.conversation_id)
+        for record in records
+    }
+    calls = []
+    monkeypatch.setattr(
+        main_module.store,
+        "get_conversations",
+        lambda ids: calls.append(ids) or {cid: conversations[cid] for cid in ids},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        main_module.store,
+        "get_conversation",
+        lambda _conversation_id: (_ for _ in ()).throw(AssertionError("single-row lookup used")),
+    )
+
+    assert client.get("/api/analysis/conversations").status_code == 200
+    assert len(calls) == 1
 
 
 def test_list_paginates_and_searches_on_the_server():

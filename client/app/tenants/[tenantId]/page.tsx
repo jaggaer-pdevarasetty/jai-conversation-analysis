@@ -37,7 +37,7 @@ export default function TenantUsersPage() {
   const [search, setSearch] = useState("");
   const [role, setRole] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const { region } = useRegion();
+  const { region, loading: regionLoading } = useRegion();
 
   const load = useCallback(() => {
     setError(null);
@@ -51,8 +51,8 @@ export default function TenantUsersPage() {
   }, [tenantId, region]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    if (!regionLoading) load();
+  }, [load, regionLoading]);
 
   const roles = useMemo(() => [...new Set((users ?? []).map((user) => user.role).filter((value): value is string => Boolean(value)))].sort(), [users]);
   const visibleUsers = useMemo(() => {
