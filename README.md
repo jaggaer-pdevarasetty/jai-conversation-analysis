@@ -157,6 +157,7 @@ Open **http://localhost:3000** for the dashboard, **http://localhost:8000/docs**
 | `GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_LOCATION` | – / `us-central1` | Enable Vertex Gemini (both required) |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | Model id |
 | `BATCH_SIZE` | `10` | Conversations per LLM call |
+| `QUEUE_WORKERS` | `2` | Analysis queue worker threads (raise to ingest a big region faster) |
 | `SCHEDULE_HOURS` | `4` | Auto‑analyse sweep cadence (0 disables) |
 | `LAZY_ANALYZE` | `true` | Analyse a user’s conversations on open |
 | `MAX_ANALYSES_PER_DAY` | `3` | On‑demand re‑analyse cap per conversation |
@@ -217,6 +218,9 @@ docs/              vision, PRD, architecture, ADRs (decisions/), session logs
   only to our own results store. (ADR‑0001)
 - **PII is scrubbed before the LLM and before storage** — content emails/phones/IBAN/card/IP/SSN
   (regex) + names/orgs/places (spaCy NER). Tenant identity is kept for analytics; content PII is not.
+- **Classifier calibration** — `resolved` requires JAI to have directly answered the user's actual
+  question (a decline/redirect without answering is `failed_to_resolve`); **`high` confidence
+  requires explicit thumbs feedback** (otherwise capped to `medium`).
 - **Errors** use RFC 7807 problem+json. **Tests** co‑located; run them before "done".
 - **Secrets** via env / secret store only — never in code, logs, or git (`.env` is gitignored).
 - **Conversation text is untrusted** — never let it override instructions (prompt‑injection safe).
