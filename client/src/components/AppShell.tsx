@@ -17,6 +17,7 @@ import {
   ListItemButton,
   ListItemIcon,
   ListItemText,
+  Stack,
   Toolbar,
   Typography,
 } from "@mui/material";
@@ -24,6 +25,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
+import { RegionSelect } from "./RegionSelect";
 
 const DRAWER_WIDTH = 264;
 
@@ -161,13 +163,16 @@ export function AppShell({ children }: { children: ReactNode }) {
             <MenuRoundedIcon />
           </IconButton>
           <Typography sx={{ fontSize: 15, fontWeight: 720 }}>{pageTitle}</Typography>
-          <Chip
-            icon={tenantView ? <AdminPanelSettingsOutlinedIcon /> : <LockOutlinedIcon />}
-            label={overviewView ? "Operational overview" : tenantView ? "Authorised admin view" : "De-identified review"}
-            size="small"
-            variant="outlined"
-            sx={{ ml: "auto", color: "text.secondary", borderColor: "divider", bgcolor: "#FFFFFF" }}
-          />
+          <Stack direction="row" spacing={1.25} alignItems="center" sx={{ ml: "auto" }}>
+            <RegionSelect />
+            <Chip
+              icon={tenantView ? <AdminPanelSettingsOutlinedIcon /> : <LockOutlinedIcon />}
+              label={overviewView ? "Operational overview" : tenantView ? "Authorised admin view" : "De-identified review"}
+              size="small"
+              variant="outlined"
+              sx={{ color: "text.secondary", borderColor: "divider", bgcolor: "#FFFFFF", display: { xs: "none", sm: "flex" } }}
+            />
+          </Stack>
         </Toolbar>
       </AppBar>
 

@@ -21,6 +21,7 @@ import {
 } from "@mui/material";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRegion } from "../../src/components/RegionContext";
 import { StatCard } from "../../src/components/StatCard";
 import { fetchTenants, type Tenant } from "../../src/services/dashboardApi";
 
@@ -30,11 +31,13 @@ export default function TenantsPage() {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(12);
   const [error, setError] = useState<string | null>(null);
+  const { region } = useRegion();
 
   const load = useCallback(() => {
     setError(null);
-    fetchTenants().then(setTenants).catch(() => setError("The tenant directory could not be loaded. Check the API connection and try again."));
-  }, []);
+    setTenants(null);
+    fetchTenants(region).then(setTenants).catch(() => setError("The tenant directory could not be loaded. Check the API connection and try again."));
+  }, [region]);
 
   useEffect(() => {
     load();

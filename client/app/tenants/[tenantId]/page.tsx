@@ -25,6 +25,7 @@ import {
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRegion } from "../../../src/components/RegionContext";
 import { StatCard } from "../../../src/components/StatCard";
 import { fetchTenants, fetchTenantUsers, type Tenant, type TenantUser } from "../../../src/services/dashboardApi";
 
@@ -36,16 +37,18 @@ export default function TenantUsersPage() {
   const [search, setSearch] = useState("");
   const [role, setRole] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const { region } = useRegion();
 
   const load = useCallback(() => {
     setError(null);
-    Promise.all([fetchTenants(), fetchTenantUsers(tenantId)])
+    setUsers(null);
+    Promise.all([fetchTenants(region), fetchTenantUsers(tenantId, region)])
       .then(([tenants, tenantUsers]) => {
         setTenant(tenants.find((item) => item.tenant_id === tenantId) ?? null);
         setUsers(tenantUsers);
       })
       .catch(() => setError("The tenant users could not be loaded. Check the API connection and try again."));
-  }, [tenantId]);
+  }, [tenantId, region]);
 
   useEffect(() => {
     load();

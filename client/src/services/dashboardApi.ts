@@ -1,12 +1,19 @@
 import { API_BASE } from "../config";
 
 export interface Overview {
+  region?: string | null;
   tenants: number;
   users: number;
   conversations: number;
   analysed: number;
   unanalysed: number;
   counts: Record<string, number>;
+}
+export interface RegionInfo {
+  label: string;
+  reachable: boolean | null;
+  counts: Record<string, number>;
+  error: string | null;
 }
 export interface Tenant {
   tenant_id: string;
@@ -44,14 +51,28 @@ async function getJson<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-export const fetchOverview = () => getJson<Overview>("/api/analysis/dashboard/overview");
-export const fetchTenants = () =>
-  getJson<{ items: Tenant[] }>("/api/analysis/dashboard/tenants").then((d) => d.items);
-export const fetchTenantUsers = (tenantId: string) =>
-  getJson<{ items: TenantUser[] }>(`/api/analysis/dashboard/tenants/${tenantId}/users`).then(
-    (d) => d.items,
-  );
-export const fetchUserConversations = (tenantId: string, userId: string, limit = 25, offset = 0) =>
+/** `?region=us` when a region is selected, else empty (all regions). */
+const rq = (region?: string) => (region ? `?region=${encodeURIComponent(region)}` : "");
+
+export const fetchRegions = () =>
+  getJson<{ items: RegionInfo[] }>("/api/analysis/regions").then((d) => d.items);
+export const fetchOverview = (region?: string) =>
+  getJson<Overview>(`/api/analysis/dashboard/overview${rq(region)}`);
+export const fetchTenants = (region?: string) =>
+  getJson<{ items: Tenant[] }>(`/api/analysis/dashboard/tenants${rq(region)}`).then((d) => d.items);
+export const fetchTenantUsers = (tenantId: string, region?: string) =>
+  getJson<{ items: TenantUser[] }>(
+    `/api/analysis/dashboard/tenants/${tenantId}/users${rq(region)}`,
+  ).then((d) => d.items);
+export const fetchUserConversations = (
+  tenantId: string,
+  userId: string,
+  limit = 25,
+  offset = 0,
+  region?: string,
+) =>
   getJson<UserConversationPage>(
-    `/api/analysis/dashboard/tenants/${tenantId}/users/${userId}/conversations?limit=${limit}&offset=${offset}`,
+    `/api/analysis/dashboard/tenants/${tenantId}/users/${userId}/conversations?limit=${limit}&offset=${offset}${
+      region ? `&region=${encodeURIComponent(region)}` : ""
+    }`,
   );

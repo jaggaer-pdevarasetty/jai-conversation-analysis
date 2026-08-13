@@ -30,6 +30,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { fetchAnalysis, type ListItem } from "../services/analysisApi";
 import { CategoryChip } from "./CategoryChip";
+import { useRegion } from "./RegionContext";
 
 const CATEGORY_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "", label: "All categories" },
@@ -79,6 +80,7 @@ export function ReviewerTable() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
+  const { region } = useRegion();
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -94,6 +96,7 @@ export function ReviewerTable() {
     setError(null);
     fetchAnalysis({
       category,
+      region,
       query,
       confidence,
       review_state: reviewState,
@@ -117,7 +120,7 @@ export function ReviewerTable() {
     return () => {
       active = false;
     };
-  }, [category, confidence, page, query, reload, reviewState, rowsPerPage, sort]);
+  }, [category, confidence, page, query, region, reload, reviewState, rowsPerPage, sort]);
 
   const needsAttention = (counts.failed_to_resolve ?? 0) + (counts.negative_feedback ?? 0) + (counts.out_of_scope ?? 0);
   const hasFilters = Boolean(category || confidence || reviewState || search || sort !== "attention");

@@ -32,6 +32,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CategoryChip } from "../../../../../src/components/CategoryChip";
+import { useRegion } from "../../../../../src/components/RegionContext";
 import { StatCard } from "../../../../../src/components/StatCard";
 import {
   fetchTenants,
@@ -77,29 +78,30 @@ export default function UserConversationsPage() {
   const [search, setSearch] = useState("");
   const [outcome, setOutcome] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const { region } = useRegion();
 
   const load = useCallback(
     () => {
       setError(null);
-      return fetchUserConversations(tenantId, userId, rowsPerPage, page * rowsPerPage)
+      return fetchUserConversations(tenantId, userId, rowsPerPage, page * rowsPerPage, region)
         .then((result) => {
           setItems(result.items);
           setTotal(result.total);
         })
         .catch(() => setError("The conversations could not be loaded. Check the API connection and try again."));
     },
-    [page, rowsPerPage, tenantId, userId],
+    [page, rowsPerPage, tenantId, userId, region],
   );
 
   useEffect(() => {
-    Promise.all([fetchTenants(), fetchTenantUsers(tenantId)])
+    Promise.all([fetchTenants(region), fetchTenantUsers(tenantId, region)])
       .then(([tenants, users]) => {
         setTenant(tenants.find((item) => item.tenant_id === tenantId) ?? null);
         setUser(users.find((item) => item.user_id === userId) ?? null);
       })
       .catch(() => setError("The user context could not be loaded."));
     void load();
-  }, [load, tenantId, userId]);
+  }, [load, tenantId, userId, region]);
 
   // Auto-refresh while anything is still being analysed (lazy analyse in progress).
   useEffect(() => {

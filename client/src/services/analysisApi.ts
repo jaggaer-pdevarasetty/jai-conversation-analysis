@@ -40,6 +40,7 @@ export interface ListResponse {
 
 export interface AnalysisQuery {
   category?: string;
+  region?: string;
   query?: string;
   confidence?: string;
   review_state?: string;
@@ -150,6 +151,8 @@ export interface FeedbackItem extends ConversationSource {
 export interface FeedbackQuery {
   rating?: string;
   category?: string;
+  region?: string;
+  scope?: string;
   query?: string;
   sort?: string;
   limit?: number;

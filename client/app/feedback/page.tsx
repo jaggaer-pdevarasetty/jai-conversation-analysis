@@ -33,6 +33,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CATEGORIES, fetchFeedback, type FeedbackItem, type FeedbackListResponse } from "../../src/services/analysisApi";
 import { CATEGORY_META, CategoryChip } from "../../src/components/CategoryChip";
+import { useRegion } from "../../src/components/RegionContext";
 import { StatCard } from "../../src/components/StatCard";
 
 function formatDate(value?: string | null): string {
@@ -56,13 +57,15 @@ export default function FeedbackPage() {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [error, setError] = useState<string | null>(null);
+  const { region } = useRegion();
 
   const load = useCallback(() => {
     setError(null);
-    fetchFeedback()
+    setData(null);
+    fetchFeedback({ region })
       .then(setData)
       .catch(() => setError("The explicit-feedback records could not be loaded. Check the API connection and try again."));
-  }, []);
+  }, [region]);
 
   useEffect(() => {
     load();

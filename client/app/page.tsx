@@ -25,6 +25,7 @@ import {
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CATEGORY_META, CategoryChip } from "../src/components/CategoryChip";
+import { useRegion } from "../src/components/RegionContext";
 import { StatCard } from "../src/components/StatCard";
 import {
   fetchAnalysis,
@@ -69,13 +70,14 @@ export default function OverviewPage() {
   const [run, setRun] = useState<RunSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const { region } = useRegion();
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     const [analysisResult, overviewResult, runResult] = await Promise.allSettled([
-      fetchAnalysis(),
-      fetchOverview(),
+      fetchAnalysis({ region }),
+      fetchOverview(region),
       fetchLatestRun(),
     ]);
     if (analysisResult.status === "rejected") {
@@ -87,7 +89,7 @@ export default function OverviewPage() {
     setOverview(overviewResult.status === "fulfilled" ? overviewResult.value : null);
     setRun(runResult.status === "fulfilled" ? runResult.value : null);
     setLoading(false);
-  }, []);
+  }, [region]);
 
   useEffect(() => {
     void load();
