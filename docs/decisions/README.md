@@ -23,6 +23,7 @@ Decision, Consequences, and (optionally) Alternatives considered.
 - ADR-0014 — Operational overview with tenant administration and pooled review workflows
 - ADR-0015 — Safe transcript Markdown and responsive review filters
 - ADR-0016 — Server-backed pagination and live analysis queue visibility
+- ADR-0017 — Feedback analytics and detail frontend on the existing API
 
 ## Rule
 When you make a non-trivial choice during a task, add or update an ADR in the same change,
