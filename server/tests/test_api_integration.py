@@ -59,6 +59,20 @@ def test_list_bulk_loads_conversations(monkeypatch):
     assert len(calls) == 1
 
 
+def test_list_defaults_to_latest_conversation_activity():
+    body = client.get("/api/analysis/conversations", params={"limit": 200}).json()
+    dates = [item["last_message_at"] or item["analyzed_at"] for item in body["items"]]
+    assert dates == sorted(dates, reverse=True)
+
+
+def test_list_sorts_oldest_conversation_activity():
+    body = client.get(
+        "/api/analysis/conversations", params={"sort": "oldest", "limit": 200}
+    ).json()
+    dates = [item["last_message_at"] or item["analyzed_at"] for item in body["items"]]
+    assert dates == sorted(dates)
+
+
 def test_list_paginates_and_searches_on_the_server():
     first = client.get("/api/analysis/conversations", params={"limit": 2, "offset": 0}).json()
     second = client.get("/api/analysis/conversations", params={"limit": 2, "offset": 2}).json()

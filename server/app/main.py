@@ -109,6 +109,13 @@ def _metrics(record: AnalysisRecord) -> dict:
     return asdict(record.metrics)  # None values → JSON null (AC-7: unavailable, not zero)
 
 
+def _last_message_at(conv: CommonConversation | None) -> str | None:
+    if conv is None:
+        return None
+    value = max((message.created_at for message in conv.messages if message.created_at), default=None)
+    return value.replace(" ", "T", 1) if value else None
+
+
 def _list_item(record: AnalysisRecord, conv: CommonConversation | None) -> dict:
     return {
         "conversation_id": record.conversation_id,
@@ -120,6 +127,7 @@ def _list_item(record: AnalysisRecord, conv: CommonConversation | None) -> dict:
         "overridden": record.override is not None,
         "has_feedback": bool(conv and conv.feedback.rating is not None),
         "metrics": _metrics(record),
+        "last_message_at": _last_message_at(conv),
         "analyzed_at": record.analyzed_at,
     }
 
@@ -158,7 +166,7 @@ def list_conversations(
     query: str | None = Query(default=None, max_length=200),
     confidence: str | None = Query(default=None),
     review_state: str | None = Query(default=None),
-    sort: str = Query(default="attention"),
+    sort: str = Query(default="newest"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ):
@@ -170,7 +178,7 @@ def list_conversations(
         return problem_response(400, "Invalid confidence", f"Unknown confidence: {confidence}")
     if review_state is not None and review_state not in {"attention", "feedback", "overridden", "missing_telemetry"}:
         return problem_response(400, "Invalid review state", f"Unknown review state: {review_state}")
-    if sort not in {"attention", "newest", "confidence", "slowest", "tokens"}:
+    if sort not in {"newest", "oldest", "attention", "confidence", "slowest", "tokens"}:
         return problem_response(400, "Invalid sort", f"Unknown sort: {sort}")
 
     records = store.list(category=category, region=region)  # type: ignore[arg-type]
@@ -202,7 +210,9 @@ def list_conversations(
     priority = {"negative_feedback": 0, "failed_to_resolve": 1, "out_of_scope": 2, "positive_feedback": 3, "resolved": 4}
     confidence_order = {"low": 0, "medium": 1, "high": 2}
     if sort == "newest":
-        items.sort(key=lambda item: item.get("analyzed_at") or "", reverse=True)
+        items.sort(key=lambda item: item.get("last_message_at") or item.get("analyzed_at") or "", reverse=True)
+    elif sort == "oldest":
+        items.sort(key=lambda item: item.get("last_message_at") or item.get("analyzed_at") or "")
     elif sort == "confidence":
         items.sort(key=lambda item: confidence_order.get(item["confidence"], 3))
     elif sort == "slowest":
@@ -287,7 +297,7 @@ def feedback_conversations(
     rating: str | None = Query(default=None, pattern="^(positive|negative)$"),
     category: str | None = Query(default=None),
     query: str | None = Query(default=None, max_length=200),
-    sort: str = Query(default="negative_first", pattern="^(negative_first|newest|oldest)$"),
+    sort: str = Query(default="newest", pattern="^(newest|oldest|negative_first)$"),
     limit: int = Query(default=10, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ):
@@ -331,6 +341,7 @@ def feedback_conversations(
                 "why_it_happened": (deep or {}).get("why_it_happened", ""),
                 "input_tokens": m.input_tokens,
                 "output_tokens": m.output_tokens,
+                "last_message_at": _last_message_at(conv),
                 "analyzed_at": record.analyzed_at,
                 "analyzer_version": record.analyzer_version,
                 "deep": deep,
@@ -383,9 +394,9 @@ def feedback_conversations(
         return 3
 
     if sort == "newest":
-        items.sort(key=lambda item: item["analyzed_at"] or "", reverse=True)
+        items.sort(key=lambda item: item["last_message_at"] or item["analyzed_at"] or "", reverse=True)
     elif sort == "oldest":
-        items.sort(key=lambda item: item["analyzed_at"] or "")
+        items.sort(key=lambda item: item["last_message_at"] or item["analyzed_at"] or "")
     else:
         items.sort(key=_rank)
     total = len(items)

@@ -23,6 +23,12 @@ from .chatdb import _engine_for, region_labels, resolve_region, safe_schema
 from .store import CommonStore
 
 
+def _timestamp(value) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat() if hasattr(value, "isoformat") else str(value).replace(" ", "T", 1)
+
+
 @lru_cache
 def _dashboard_engine(url: str, db_name: str):
     return _engine_for(url, db_name)
@@ -143,8 +149,8 @@ def conversation_meta(ids: list[str], region: str | None = None) -> dict[str, di
                         "user_name": r["user_name"] or (f"User {r['user_id']}" if r["user_id"] else None),
                         "title": r["title"],
                         "status": r["status"],
-                        "created_at": str(r["created_at"]) if r["created_at"] else None,
-                        "last_message_at": str(r["last_message_at"]) if r["last_message_at"] else None,
+                        "created_at": _timestamp(r["created_at"]),
+                        "last_message_at": _timestamp(r["last_message_at"]),
                         "message_count": r["message_count"],
                     }
                 ),
@@ -189,7 +195,7 @@ def user_conversations(
                 "conversation_id": cid,
                 "title": r["title"],
                 "message_count": r["message_count"],
-                "last_message_at": str(r["last_message_at"]) if r["last_message_at"] else None,
+                "last_message_at": _timestamp(r["last_message_at"]),
                 "analysed": rec is not None,
                 "status": status,
                 "category": rec.category if rec else None,

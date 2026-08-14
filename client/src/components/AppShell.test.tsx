@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { AppShell } from "./AppShell";
+import { AppShell, idSearchHref } from "./AppShell";
 
 const mockPush = jest.fn();
 const mockSetRegion = jest.fn();
@@ -17,6 +17,13 @@ jest.mock("./RegionContext", () => ({
     regions: [{ label: "us", reachable: true, counts: {}, error: null }],
   }),
 }));
+
+describe("Overview ID search", () => {
+  it("routes conversation UUIDs and tenant IDs to their records", () => {
+    expect(idSearchHref("4512ec35-9164-4225-a7eb-06c1a26cf652")).toBe("/conversations/4512ec35-9164-4225-a7eb-06c1a26cf652");
+    expect(idSearchHref("20256789")).toBe("/tenants/20256789");
+  });
+});
 
 describe("AppShell", () => {
   beforeEach(() => jest.clearAllMocks());

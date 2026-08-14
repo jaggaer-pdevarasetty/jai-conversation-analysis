@@ -7,7 +7,7 @@ const deep = {
   why_it_happened: "The answer focused on setup instead of the task.",
   how_to_avoid: "Confirm the user's intended action.",
   suggestions: "Improve the comparison guidance.",
-  user_remark: "Not useful",
+  user_remark: "**Not useful**",
 };
 
 const detail: ConversationDetail = {
@@ -41,7 +41,7 @@ const detail: ConversationDetail = {
     { id: "m1", role: "user", content: "How do I compare responses?", sequence_num: 1, model: null, created_at: "2026-08-11T00:00:00Z" },
     { id: "m2", role: "assistant", content: "Use **Bid Collector**.", sequence_num: 2, model: "gemini", created_at: "2026-08-11T00:01:00Z" },
   ],
-  feedback: { rating: false, comment: "Not useful", message_id: "m2" },
+  feedback: { rating: false, comment: "**Not useful**", message_id: "m2" },
 };
 
 const feedback: FeedbackItem = {
@@ -51,7 +51,7 @@ const feedback: FeedbackItem = {
   model_category: "negative_feedback",
   confidence: "high",
   rating: false,
-  comment: "Not useful",
+  comment: "**Not useful**",
   feedback_message_id: "m2",
   recommended_next_step: detail.analysis.recommended_next_step,
   rationale: detail.analysis.rationale,
@@ -69,7 +69,8 @@ describe("FeedbackConversationDetail", () => {
     expect(screen.getByRole("heading", { name: "Compare supplier responses" })).toBeInTheDocument();
     expect(screen.getByText("How do I compare responses?")).toBeInTheDocument();
     expect(screen.getByText("Rated response")).toBeInTheDocument();
-    expect(screen.getAllByText("Not useful").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Not useful").some((node) => node.tagName === "STRONG")).toBe(true);
+    expect(screen.queryByText("**Not useful**")).not.toBeInTheDocument();
     expect(screen.getByText("Bid Collector").tagName).toBe("STRONG");
     expect(screen.getByText("The answer focused on setup instead of the task.")).toBeInTheDocument();
   });

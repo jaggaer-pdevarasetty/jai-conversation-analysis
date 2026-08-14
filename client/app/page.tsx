@@ -8,6 +8,7 @@ import ErrorOutlineRoundedIcon from "@mui/icons-material/ErrorOutlineRounded";
 import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined";
 import ForumOutlinedIcon from "@mui/icons-material/ForumOutlined";
 import GroupsOutlinedIcon from "@mui/icons-material/GroupsOutlined";
+import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
 import SpeedRoundedIcon from "@mui/icons-material/SpeedRounded";
 import {
   Alert,
@@ -16,14 +17,18 @@ import {
   Button,
   Chip,
   Divider,
+  InputAdornment,
   LinearProgress,
   Paper,
   Skeleton,
   Stack,
+  TextField,
   Typography,
 } from "@mui/material";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { idSearchHref } from "../src/components/AppShell";
 import { CATEGORY_META, CategoryChip } from "../src/components/CategoryChip";
 import { useRegion } from "../src/components/RegionContext";
 import { StatCard } from "../src/components/StatCard";
@@ -70,6 +75,8 @@ export default function OverviewPage() {
   const [run, setRun] = useState<RunSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [idSearch, setIdSearch] = useState("");
+  const router = useRouter();
   const { region, loading: regionLoading } = useRegion();
 
   const load = useCallback(async () => {
@@ -96,7 +103,7 @@ export default function OverviewPage() {
   }, [load, regionLoading]);
 
   const recent = useMemo(
-    () => [...(data?.items ?? [])].sort((a, b) => (b.analyzed_at ?? "").localeCompare(a.analyzed_at ?? "")).slice(0, 5),
+    () => [...(data?.items ?? [])].sort((a, b) => (b.last_message_at ?? b.analyzed_at ?? "").localeCompare(a.last_message_at ?? a.analyzed_at ?? "")).slice(0, 5),
     [data],
   );
 
@@ -145,6 +152,26 @@ export default function OverviewPage() {
           <Typography color="text.secondary" sx={{ mt: 1, maxWidth: 720 }}>
             Organisation coverage, conversation outcomes, analysis health, and the latest records in one place.
           </Typography>
+          <Box
+            component="form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (idSearch.trim()) router.push(idSearchHref(idSearch));
+            }}
+            sx={{ mt: 2, display: "flex", gap: 1, width: "100%", maxWidth: 620 }}
+          >
+            <TextField
+              fullWidth
+              required
+              size="small"
+              label="Find conversation or tenant"
+              placeholder="Conversation UUID or tenant ID"
+              value={idSearch}
+              onChange={(event) => setIdSearch(event.target.value)}
+              InputProps={{ startAdornment: <InputAdornment position="start"><SearchRoundedIcon fontSize="small" /></InputAdornment> }}
+            />
+            <Button type="submit" variant="contained">Find</Button>
+          </Box>
         </Box>
         <Stack direction="row" spacing={1.25} flexWrap="wrap" useFlexGap>
           <Button component={Link} href="/tenants" variant="outlined" endIcon={<ArrowForwardRoundedIcon />}>Browse tenants</Button>

@@ -36,6 +36,12 @@ def test_feedback_filters_and_paginates_on_the_server():
     assert "deep_analysed" in first
 
 
+def test_feedback_defaults_to_latest_conversation_activity():
+    body = client.get("/api/analysis/feedback", params={"limit": 100}).json()
+    dates = [item["last_message_at"] or item["analyzed_at"] for item in body["items"]]
+    assert dates == sorted(dates, reverse=True)
+
+
 def test_feedback_searches_by_conversation_id():
     item = client.get("/api/analysis/feedback", params={"limit": 1}).json()["items"][0]
     result = client.get(

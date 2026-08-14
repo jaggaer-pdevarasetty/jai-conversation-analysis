@@ -25,6 +25,8 @@ function response(params: AnalysisQuery = {}): ListResponse {
     metrics: index === 1
       ? { ttft_ms: null, input_tokens: null, output_tokens: null, prompt_tokens: null }
       : { ttft_ms: 340, input_tokens: 130, output_tokens: 48, prompt_tokens: 120 },
+    last_message_at: "2026-08-13T18:52:59Z",
+    analyzed_at: "2026-08-14T05:43:39Z",
   }));
   let items = params.category ? all.filter((item) => item.category === params.category) : all;
   if (params.query) items = items.filter((item) => item.conversation_id.includes(params.query!) || item.recommended_next_step.includes(params.query!));
@@ -54,6 +56,11 @@ describe("ReviewerTable", () => {
   beforeEach(() => {
     mockRegionLoading = false;
     fetchAnalysisMock.mockClear();
+  });
+
+  it("loads the latest conversation activity first by default", async () => {
+    render(<ReviewerTable />);
+    await waitFor(() => expect(fetchAnalysisMock).toHaveBeenCalledWith(expect.objectContaining({ sort: "newest" })));
   });
 
   it("waits for the saved region before loading data", async () => {

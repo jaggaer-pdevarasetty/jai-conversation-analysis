@@ -61,6 +61,12 @@ def test_store_region_filter_is_strict():
     assert {r.conversation_id for r in store.list()} == {"x", "y"}
 
 
+def test_dashboard_timestamps_are_iso_formatted():
+    from app.dashboard import _timestamp
+
+    assert _timestamp("2026-08-13 18:52:59") == "2026-08-13T18:52:59"
+
+
 def test_dashboard_reuses_region_engine(monkeypatch):
     from app import dashboard
 
