@@ -74,7 +74,7 @@ export function ReviewerTable() {
   const [reviewState, setReviewState] = useState("");
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
-  const [sort, setSort] = useState("attention");
+  const [sort, setSort] = useState("newest");
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const [loading, setLoading] = useState(true);
@@ -124,7 +124,7 @@ export function ReviewerTable() {
   }, [category, confidence, page, query, region, regionLoading, reload, reviewState, rowsPerPage, sort]);
 
   const needsAttention = (counts.failed_to_resolve ?? 0) + (counts.negative_feedback ?? 0) + (counts.out_of_scope ?? 0);
-  const hasFilters = Boolean(category || confidence || reviewState || search || sort !== "attention");
+  const hasFilters = Boolean(category || confidence || reviewState || search || sort !== "newest");
   const firstResult = total ? page * rowsPerPage + 1 : 0;
   const lastResult = Math.min((page + 1) * rowsPerPage, total);
 
@@ -134,7 +134,7 @@ export function ReviewerTable() {
     setReviewState("");
     setSearch("");
     setQuery("");
-    setSort("attention");
+    setSort("newest");
     setPage(0);
   }
 
@@ -189,8 +189,9 @@ export function ReviewerTable() {
           <MenuItem value="missing_telemetry">Missing telemetry</MenuItem>
         </TextField>
         <TextField fullWidth select size="small" label="Sort" value={sort} onChange={(event) => { setSort(event.target.value); setPage(0); }}>
+          <MenuItem value="newest">Newest conversation</MenuItem>
+          <MenuItem value="oldest">Oldest conversation</MenuItem>
           <MenuItem value="attention">Attention first</MenuItem>
-          <MenuItem value="newest">Newest analysis</MenuItem>
           <MenuItem value="confidence">Lowest confidence</MenuItem>
           <MenuItem value="slowest">Slowest response</MenuItem>
           <MenuItem value="tokens">Highest token use</MenuItem>
@@ -234,7 +235,8 @@ export function ReviewerTable() {
                     <MuiLink component={Link} href={`/conversations/${item.conversation_id}`} underline="hover" sx={{ display: "block", color: "text.primary", fontWeight: 750, fontSize: 13, overflowWrap: "anywhere" }}>
                       {item.conversation_id}
                     </MuiLink>
-                    <Typography variant="caption" color="text.secondary">{formatDate(item.analyzed_at)}</Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>Last message {formatDate(item.last_message_at ?? item.analyzed_at)}</Typography>
+                    <Typography variant="caption" color="text.secondary">Analysed {formatDate(item.analyzed_at)}</Typography>
                   </TableCell>
                   <TableCell sx={{ width: 175 }}>
                     <CategoryChip category={item.category} />

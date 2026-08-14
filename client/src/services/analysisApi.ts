@@ -26,6 +26,7 @@ export interface ListItem {
   overridden: boolean;
   has_feedback: boolean;
   metrics: Metrics;
+  last_message_at?: string | null;
   analyzed_at?: string;
 }
 

@@ -28,6 +28,12 @@ import { useEffect, useState } from "react";
 import { RegionSelect } from "./RegionSelect";
 
 const DRAWER_WIDTH = 264;
+const CONVERSATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function idSearchHref(input: string): string {
+  const id = input.trim();
+  return `${CONVERSATION_ID.test(id) ? "/conversations" : "/tenants"}/${encodeURIComponent(id)}`;
+}
 
 const NAV = [
   { href: "/", label: "Overview", icon: <DashboardRoundedIcon /> },

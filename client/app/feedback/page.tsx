@@ -14,6 +14,7 @@ import {
   Button,
   Chip,
   InputAdornment,
+  LinearProgress,
   Link as MuiLink,
   MenuItem,
   Paper,
@@ -33,6 +34,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CATEGORIES, fetchFeedback, type FeedbackItem, type FeedbackListResponse } from "../../src/services/analysisApi";
 import { CATEGORY_META, CategoryChip } from "../../src/components/CategoryChip";
+import { MarkdownContent } from "../../src/components/MarkdownContent";
 import { useRegion } from "../../src/components/RegionContext";
 import { StatCard } from "../../src/components/StatCard";
 
@@ -54,9 +56,10 @@ export default function FeedbackPage() {
   const [query, setQuery] = useState("");
   const [rating, setRating] = useState("");
   const [category, setCategory] = useState("");
-  const [sort, setSort] = useState("negative_first");
+  const [sort, setSort] = useState("newest");
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const requestId = useRef(0);
   const { region, loading: regionLoading } = useRegion();
@@ -68,6 +71,7 @@ export default function FeedbackPage() {
 
   const load = useCallback(() => {
     const currentRequest = ++requestId.current;
+    setLoading(true);
     setError(null);
     fetchFeedback({
       region,
@@ -83,6 +87,9 @@ export default function FeedbackPage() {
       })
       .catch(() => {
         if (currentRequest === requestId.current) setError("The explicit-feedback records could not be loaded. Check the API connection and try again.");
+      })
+      .finally(() => {
+        if (currentRequest === requestId.current) setLoading(false);
       });
   }, [category, page, query, rating, region, rowsPerPage, sort]);
 
@@ -105,14 +112,14 @@ export default function FeedbackPage() {
   const negativeRate = scopeTotal ? Math.round((negative / scopeTotal) * 100) : 0;
   const deepCoverage = scopeTotal ? Math.round((deepAnalysed / scopeTotal) * 100) : 0;
   const visibleItems = data.limit === undefined ? data.items.slice(page * rowsPerPage, (page + 1) * rowsPerPage) : data.items;
-  const hasFilters = Boolean(search || rating || category || sort !== "negative_first");
+  const hasFilters = Boolean(search || rating || category || sort !== "newest");
 
   function clearFilters() {
     setSearch("");
     setQuery("");
     setRating("");
     setCategory("");
-    setSort("negative_first");
+    setSort("newest");
     setPage(0);
   }
 
@@ -132,7 +139,7 @@ export default function FeedbackPage() {
       {negative > 0 && (
         <Alert severity="warning">
           <AlertTitle>{negative} negative {negative === 1 ? "rating requires" : "ratings require"} attention</AlertTitle>
-          Negative feedback is prioritised first so reviewers can move directly from the user remark to the complete conversation and root cause.
+          Use the sentiment filter to focus on negative ratings, then open the full conversation and root cause.
         </Alert>
       )}
 
@@ -163,13 +170,14 @@ export default function FeedbackPage() {
           {CATEGORIES.map((value) => <MenuItem key={value} value={value}>{CATEGORY_META[value].label}</MenuItem>)}
         </TextField>
         <TextField fullWidth select size="small" label="Sort" value={sort} onChange={(event) => { setSort(event.target.value); setPage(0); }}>
+          <MenuItem value="newest">Newest conversation</MenuItem>
+          <MenuItem value="oldest">Oldest conversation</MenuItem>
           <MenuItem value="negative_first">Negative first</MenuItem>
-          <MenuItem value="newest">Newest analysis</MenuItem>
-          <MenuItem value="oldest">Oldest analysis</MenuItem>
         </TextField>
       </Paper>
 
       <TableContainer component={Paper}>
+        {loading && <LinearProgress aria-label="Loading feedback filters" />}
         <Box sx={{ px: 2.5, py: 2, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, borderBottom: "1px solid", borderColor: "divider" }}>
           <Box>
             <Typography variant="h3">Feedback records</Typography>
@@ -200,16 +208,17 @@ export default function FeedbackPage() {
                     color={item.rating ? "success" : "error"}
                     variant="outlined"
                   />
-                  <Typography variant="body2" sx={{ mt: 1, fontWeight: 650, display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 3, overflow: "hidden" }}>
-                    {item.comment ? `“${item.comment}”` : "No written remark"}
-                  </Typography>
+                  <Box sx={{ mt: 1, fontWeight: 650, display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 3, overflow: "hidden" }}>
+                    <MarkdownContent>{item.comment ? `“${item.comment}”` : "No written remark"}</MarkdownContent>
+                  </Box>
                 </TableCell>
                 <TableCell sx={{ width: 260 }}>
                   <MuiLink component={Link} href={`/feedback/${item.conversation_id}`} underline="hover" sx={{ color: "text.primary", fontWeight: 750, display: "block" }}>
                     {item.title || `Conversation ${item.conversation_id.slice(0, 8)}`}
                   </MuiLink>
                   <Typography variant="caption" color="text.secondary" sx={{ display: "block", overflowWrap: "anywhere" }}>{item.conversation_id}</Typography>
-                  <Typography variant="caption" color="text.secondary">{formatDate(item.last_message_at ?? item.analyzed_at)}</Typography>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>Last message {formatDate(item.last_message_at ?? item.analyzed_at)}</Typography>
+                  <Typography variant="caption" color="text.secondary">Analysed {formatDate(item.analyzed_at)}</Typography>
                 </TableCell>
                 <TableCell sx={{ width: 210 }}>
                   <Typography variant="body2" sx={{ fontWeight: 700 }}>{item.tenant_name || "Tenant unavailable"}</Typography>
@@ -220,9 +229,9 @@ export default function FeedbackPage() {
                   <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.75 }}>{item.confidence ? `${item.confidence[0].toUpperCase()}${item.confidence.slice(1)} confidence` : "Confidence unavailable"}</Typography>
                 </TableCell>
                 <TableCell sx={{ minWidth: 280, maxWidth: 420 }}>
-                  <Typography variant="body2" color={item.why_it_happened ? "text.primary" : "text.secondary"} sx={{ display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 3, overflow: "hidden" }}>
-                    {item.why_it_happened || "Root-cause analysis is not available yet."}
-                  </Typography>
+                  <Box sx={{ color: item.why_it_happened ? "text.primary" : "text.secondary", display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 3, overflow: "hidden" }}>
+                    <MarkdownContent>{item.why_it_happened || "Root-cause analysis is not available yet."}</MarkdownContent>
+                  </Box>
                 </TableCell>
                 <TableCell sx={{ whiteSpace: "nowrap" }}>
                   <Typography variant="body2" sx={{ fontWeight: 700 }}>{tokenTotal(item)}</Typography>

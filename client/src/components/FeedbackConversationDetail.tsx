@@ -140,7 +140,7 @@ export function FeedbackConversationDetail({
           </Box>
           <Box sx={{ minWidth: { md: 310 }, maxWidth: 520, p: 2, borderRadius: 2.5, bgcolor: "#FFFFFF", border: "1px solid", borderColor: `${accent}40` }}>
             <Typography variant="overline" sx={{ color: accent }}>User remark</Typography>
-            <Typography sx={{ mt: 0.4, fontWeight: 700, fontSize: 17 }}>{feedbackItem.comment ? `“${feedbackItem.comment}”` : "No written remark was provided."}</Typography>
+            <Box sx={{ mt: 0.4, fontWeight: 700, fontSize: 17 }}><MarkdownContent>{feedbackItem.comment ? `“${feedbackItem.comment}”` : "No written remark was provided."}</MarkdownContent></Box>
           </Box>
         </Box>
       </Paper>
@@ -180,7 +180,7 @@ export function FeedbackConversationDetail({
                     {highlighted && feedbackItem.comment && (
                       <Box sx={{ mt: 1, p: 1.4, borderRadius: 2, bgcolor: tint, borderLeft: "3px solid", borderColor: accent }}>
                         <Typography variant="caption" sx={{ color: accent, fontWeight: 750 }}>USER FEEDBACK ON THIS CONTEXT</Typography>
-                        <Typography variant="body2" sx={{ mt: 0.25, fontWeight: 650 }}>{feedbackItem.comment}</Typography>
+                        <Box sx={{ mt: 0.25, fontWeight: 650 }}><MarkdownContent>{feedbackItem.comment}</MarkdownContent></Box>
                       </Box>
                     )}
                   </Box>

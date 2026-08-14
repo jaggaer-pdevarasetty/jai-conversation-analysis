@@ -32,6 +32,7 @@ All data comes from **LangSmith + the chat DB** (read-only). Requirements: `docs
 cd client && npm ci && npm test        # jest (< 1s)
 npm run typecheck && npm run lint
 npm run dev                            # http://localhost:3000
+# Stop `next dev` before `npm run build`; both use .next and cannot run safely together.
 
 # server (FastAPI)
 cd server && python3.13 -m venv .venv && . .venv/bin/activate

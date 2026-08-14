@@ -191,6 +191,16 @@ non-English handling. Working on branch **`feature/J1-93353-conversation-analysi
 - Green: **client 17 jest + typecheck + lint + production build; server 77 pytest, 3 skipped;
   OpenAPI/workflow YAML valid; read-only posture guard passed**.
 
+## Done — execution increment 15 (activity dates, filters, Markdown, ID search)
+- Feedback and conversation tables now default to newest **conversation activity** rather than
+  analysis-run time; both expose newest/oldest activity options and label last-message versus analysis dates.
+- Database timestamps are returned in ISO format, feedback filter requests show visible progress, and
+  live checks confirmed newest ordering plus the negative-rating filter.
+- Feedback remarks and root-cause text now use the safe Markdown renderer in both list and detail views.
+- Overview now includes direct navigation by conversation UUID or tenant ID.
+- Green: **client 22 jest + typecheck + lint + production build; server 81 pytest, 3 skipped;
+  OpenAPI YAML valid; read-only posture guard passed**.
+
 ## Next
 1. Repopulate `analysis` from `chatdb` via Vertex + restart backend (approved) → UI shows real data.
 2. Fix `.env`: `CHAT_DB_URL` db = `jai_agentos_uit`, `CHAT_DB_SCHEMA=jai_agentos_schema_uit`, `SOURCE=chatdb`.

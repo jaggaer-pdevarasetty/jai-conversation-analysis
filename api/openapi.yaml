@@ -22,7 +22,7 @@ paths:
         - { name: query, in: query, required: false, schema: { type: string }, description: Search conversation ID or recommended next step. }
         - { name: confidence, in: query, required: false, schema: { $ref: '#/components/schemas/Confidence' } }
         - { name: review_state, in: query, required: false, schema: { type: string, enum: [attention, feedback, overridden, missing_telemetry] } }
-        - { name: sort, in: query, required: false, schema: { type: string, enum: [attention, newest, confidence, slowest, tokens], default: attention } }
+        - { name: sort, in: query, required: false, schema: { type: string, enum: [newest, oldest, attention, confidence, slowest, tokens], default: newest } }
         - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
         - { name: offset, in: query, required: false, schema: { type: integer, minimum: 0, default: 0 } }
       responses:
@@ -40,7 +40,7 @@ paths:
         - { name: rating, in: query, required: false, schema: { type: string, enum: [positive, negative] } }
         - { name: category, in: query, required: false, schema: { $ref: '#/components/schemas/Category' } }
         - { name: query, in: query, required: false, schema: { type: string }, description: Search feedback, source metadata, recommendation, or conversation ID. }
-        - { name: sort, in: query, required: false, schema: { type: string, enum: [negative_first, newest, oldest], default: negative_first } }
+        - { name: sort, in: query, required: false, schema: { type: string, enum: [newest, oldest, negative_first], default: newest } }
         - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 10 } }
         - { name: offset, in: query, required: false, schema: { type: integer, minimum: 0, default: 0 } }
       responses:
@@ -141,6 +141,7 @@ components:
         overridden: { type: boolean }
         has_feedback: { type: boolean }
         metrics: { $ref: '#/components/schemas/Metrics' }
+        last_message_at: { type: [string, 'null'], format: date-time }
         analyzed_at: { type: string, format: date-time }
     ListResponse:
       type: object
@@ -167,6 +168,7 @@ components:
         why_it_happened: { type: string }
         input_tokens: { type: [integer, 'null'] }
         output_tokens: { type: [integer, 'null'] }
+        last_message_at: { type: [string, 'null'], format: date-time }
         analyzed_at: { type: string, format: date-time }
       additionalProperties: true
     FeedbackListResponse:
