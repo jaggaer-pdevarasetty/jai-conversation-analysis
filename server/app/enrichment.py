@@ -14,33 +14,41 @@ Hard rules:
 from __future__ import annotations
 
 import json
-from functools import lru_cache
 
 from .config import settings
 from .domain.models import Enrichment
 from .http import client as make_client
 from .pii import redact
 
+# Cache ONLY successful resolutions — a transient failure must not disable enrichment for the
+# life of the process (negative results are retried on the next call).
+_PROJECT_IDS: dict[str, str] = {}
+
 
 def _headers() -> dict:
     return {"x-api-key": settings.langsmith_api_key} if settings.langsmith_api_key else {}
 
 
-@lru_cache(maxsize=32)
 def _project_id(name: str) -> str | None:
-    """Resolve a LangSmith project name → id (cached). None if not found / no key."""
+    """Resolve a LangSmith project name → id. None if not found / no key. Only truthy results
+    are memoised, so one network/auth hiccup does not permanently skip enrichment."""
     if not name or not settings.langsmith_api_key:
         return None
+    if name in _PROJECT_IDS:
+        return _PROJECT_IDS[name]
     hc = make_client()
     try:
-        r = hc.get(f"{settings.langsmith_base_url}/sessions", headers=_headers(), params={"limit": 100})
+        # Filter server-side by name so accounts with >100 projects still resolve.
+        r = hc.get(f"{settings.langsmith_base_url}/sessions", headers=_headers(),
+                   params={"name": name, "limit": 100})
         if r.status_code != 200:
             return None
         data = r.json()
         items = data if isinstance(data, list) else data.get("sessions", [])
         for p in items:
-            if isinstance(p, dict) and p.get("name") == name:
-                return p.get("id")
+            if isinstance(p, dict) and p.get("name") == name and p.get("id"):
+                _PROJECT_IDS[name] = p["id"]  # memoise success only
+                return p["id"]
     except Exception:  # noqa: BLE001 - best-effort
         return None
     finally:

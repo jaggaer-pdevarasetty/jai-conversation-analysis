@@ -74,7 +74,10 @@ _QUASI = [
     (re.compile(
         r"\b\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{4}\b",
         re.IGNORECASE), "[date]"),  # 12 August 2026
-    (re.compile(r"\b(?=[A-Za-z-]*\d)[A-Za-z]{2,}[A-Za-z0-9]*(?:-[A-Za-z0-9]+)+\b"), "[id]"),  # BUF-TAW8, PO-000123
+    # Reference codes: a letter prefix + a hyphen + a LONG digit run (>=5), e.g. PO-000123,
+    # REQ-1234567. The long digit run is what makes it identifier-like, so ordinary
+    # product/version names (COVID-19, UTF-8, SAP-2000, HTTP-500, gemini-2.5) are left intact.
+    (re.compile(r"\b[A-Za-z]{2,}-\d{5,}\b"), "[id]"),
 ]
 
 # Broad catch-alls LAST so they don't eat the specific matches above.
