@@ -155,7 +155,7 @@ Open **http://localhost:3000** for the dashboard, **http://localhost:8000/docs**
 | `STORE_BACKEND` | `memory` | `sql` (Postgres, persistent) or `memory` (tests) |
 | `RESULTS_DB_URL` | – | Postgres URL for our results store |
 | `GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_LOCATION` | – / `us-central1` | Enable Vertex Gemini (both required) |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | Model id |
+| `GEMINI_MODEL` | `gemini-2.5-flash-lite` | Model id |
 | `BATCH_SIZE` | `10` | Conversations per LLM call |
 | `QUEUE_WORKERS` | `2` | Analysis queue worker threads (raise to ingest a big region faster) |
 | `SCHEDULE_HOURS` | `4` | Auto‑analyse sweep cadence (0 disables) |
