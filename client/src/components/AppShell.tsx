@@ -25,6 +25,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
+import { AnalyzeNowButton } from "./AnalyzeNowButton";
 import { RegionSelect } from "./RegionSelect";
 
 const DRAWER_WIDTH = 264;
@@ -172,6 +173,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </IconButton>
           <Typography sx={{ display: { xs: "none", sm: "block" }, fontSize: 15, fontWeight: 720, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pageTitle}</Typography>
           <Stack direction="row" spacing={{ xs: 0.75, sm: 1.25 }} alignItems="center" sx={{ ml: "auto", minWidth: 0 }}>
+            <AnalyzeNowButton variant="outlined" />
             <RegionSelect />
             <Chip
               icon={tenantView ? <AdminPanelSettingsOutlinedIcon /> : <LockOutlinedIcon />}

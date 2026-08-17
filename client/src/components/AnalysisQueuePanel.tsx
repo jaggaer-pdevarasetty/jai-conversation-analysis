@@ -17,6 +17,7 @@ import {
 } from "@mui/material";
 import { useCallback, useEffect, useState } from "react";
 import { fetchQueue, type QueueStats } from "../services/analysisApi";
+import { AnalyzeNowButton } from "./AnalyzeNowButton";
 
 function formatDate(value: string): string {
   const date = new Date(value);
@@ -63,10 +64,11 @@ export function AnalysisQueuePanel() {
             Real conversations currently waiting, retrying, or being analysed by {data.workers} workers.
           </Typography>
         </Box>
-        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
           <Chip size="small" label={`${data.queued} queued`} variant="outlined" />
           <Chip size="small" label={`${data.in_flight} analysing`} color={data.in_flight ? "primary" : "default"} />
           {data.dead_letter > 0 && <Chip size="small" icon={<ErrorOutlineRoundedIcon />} label={`${data.dead_letter} failed`} color="error" variant="outlined" />}
+          <AnalyzeNowButton />
         </Stack>
       </Box>
       <Divider />

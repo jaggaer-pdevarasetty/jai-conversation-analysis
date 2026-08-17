@@ -6,6 +6,7 @@ RBAC: reviewer-only (gate configurable). RFC 7807 error bodies.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import asdict
 from datetime import date, datetime, timedelta, timezone
 
@@ -57,10 +58,37 @@ def _sweep() -> None:
     analysis_queue.enqueue(eligible_conversation_ids())
 
 
-scheduler = None
+_sweep_lock = threading.Lock()
+_sweep_running = False
+
+
+def trigger_sweep() -> bool:
+    """Manual trigger: run a full check + analyse sweep in the background (deduped; only
+    not-yet-analysed conversations are processed). Returns False if a sweep is already running,
+    so repeated button clicks don't pile up."""
+    global _sweep_running
+    with _sweep_lock:
+        if _sweep_running:
+            return False
+        _sweep_running = True
+
+    def _run() -> None:
+        global _sweep_running
+        try:
+            _sweep()
+        except Exception as exc:  # noqa: BLE001 - chat DB may be unreachable; never crash
+            print(f"[warn] manual sweep failed: {type(exc).__name__}", flush=True)
+        finally:
+            with _sweep_lock:
+                _sweep_running = False
+
+    threading.Thread(target=_run, name="manual-sweep", daemon=True).start()
+    return True
+
+
 region_health: list[dict] = []  # per-region connectivity, checked once at startup
 if settings.source == "chatdb":
-    # Test EVERY configured region before serving: connect + verify the 4 required tables.
+    # Test EVERY configured region before serving: connect + verify the required tables.
     # We log and continue (a bad/permission-denied region must not crash the app or leak data).
     from .chatdb import check_regions
 
@@ -71,15 +99,9 @@ if settings.source == "chatdb":
     if not any(h["ok"] for h in region_health):
         print("[startup][warn] NO region is readable — dashboards will be empty until fixed.", flush=True)
 
+    # MANUAL mode: workers are ready, but analysis runs ONLY when triggered from the UI
+    # (POST /analyze/sweep). No boot sweep and no scheduled cadence.
     analysis_queue.start()
-    try:
-        _sweep()  # initial full-coverage sweep at boot (non-blocking)
-    except Exception as exc:  # noqa: BLE001 - chat DB may be unreachable; UI still works
-        print(f"[warn] startup sweep failed: {type(exc).__name__}", flush=True)
-    from .scheduler import Scheduler  # every SCHEDULE_HOURS: pick up new/eligible convos (AC-1)
-
-    scheduler = Scheduler(settings.schedule_hours * 3600, _sweep)
-    scheduler.start()
     latest_run = run_analysis(store, [], analyze_batch=make_batch_analyzer())  # empty summary
 else:
     # fixtures / langsmith: seed synchronously so the pooled list is populated immediately.
@@ -593,6 +615,17 @@ def queue_stats(
 ):
     """Queue health: depth, in-flight, dead-letter, capacity, workers."""
     return analysis_queue.stats(limit=limit, offset=offset)
+
+
+@api.post("/analyze/sweep", status_code=202)
+def analyze_sweep():
+    """MANUAL trigger: check the chat DB and analyse every not-yet-analysed conversation
+    (deduped; already-analysed ones are skipped). Runs in the background — poll GET /queue for
+    progress. Returns 'already_running' if a sweep is still in flight."""
+    if settings.source != "chatdb":
+        return problem_response(400, "Not available", "Manual analysis applies to the chat DB source only.")
+    started = trigger_sweep()
+    return {"status": "started" if started else "already_running", "source": settings.source}
 
 
 @api.get("/stats")
