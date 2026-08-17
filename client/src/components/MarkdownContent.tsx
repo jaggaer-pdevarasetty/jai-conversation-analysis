@@ -6,12 +6,13 @@ import { createElement, Fragment, type ReactNode } from "react";
 const INLINE = /(\*\*(.+?)\*\*|`([^`]+)`|\[([^\]]+)\]\(([^)\s]+)\)|\*([^*\n]+)\*|~~(.+?)~~)/g;
 
 function inline(text: string, prefix: string): ReactNode[] {
+  const value = text.replace(/<a\b[^>]*>(.*?)<\/a>/gi, "$1").replace(/<[^>]+>/g, "");
   const nodes: ReactNode[] = [];
   let cursor = 0;
   let index = 0;
-  for (const match of text.matchAll(INLINE)) {
+  for (const match of value.matchAll(INLINE)) {
     const start = match.index ?? 0;
-    if (start > cursor) nodes.push(text.slice(cursor, start));
+    if (start > cursor) nodes.push(value.slice(cursor, start));
     const token = match[0];
     const key = `${prefix}-${index++}`;
     if (match[2] !== undefined) {
@@ -30,12 +31,23 @@ function inline(text: string, prefix: string): ReactNode[] {
     }
     cursor = start + token.length;
   }
-  if (cursor < text.length) nodes.push(text.slice(cursor));
+  if (cursor < value.length) nodes.push(value.slice(cursor));
   return nodes;
 }
 
 function startsBlock(line: string): boolean {
-  return /^\s*(```|#{1,6}\s|[-*+]\s|\d+[.)]\s|>\s|([-*_]\s*){3,})/.test(line);
+  return /^\s*(```|#{1,6}\s|[-*+]\s|\d+[.)]\s|>\s|\||([-*_]\s*){3,})/.test(line);
+}
+
+function tableCells(line: string): string[] | null {
+  const value = line.trim();
+  return value.startsWith("|") && value.endsWith("|")
+    ? value.slice(1, -1).split("|").map((cell) => cell.trim())
+    : null;
+}
+
+function isTableSeparator(cells: string[] | null): boolean {
+  return Boolean(cells?.length && cells.every((cell) => /^:?-{3,}:?$/.test(cell)));
 }
 
 function blocks(markdown: string): ReactNode[] {
@@ -61,6 +73,25 @@ function blocks(markdown: string): ReactNode[] {
     if (heading) {
       nodes.push(createElement(`h${heading[1].length}`, { key: `block-${i}` }, inline(heading[2], `heading-${i}`)));
       i += 1;
+      continue;
+    }
+    const header = tableCells(line);
+    const separator = tableCells(lines[i + 1] ?? "");
+    if (header && isTableSeparator(separator) && separator?.length === header.length) {
+      i += 2;
+      const rows: string[][] = [];
+      while (i < lines.length) {
+        const cells = tableCells(lines[i]);
+        if (!cells || cells.length !== header.length) break;
+        rows.push(cells);
+        i += 1;
+      }
+      nodes.push(
+        <table key={`block-${i}`}>
+          <thead><tr>{header.map((cell, column) => <th key={`header-${column}`}>{inline(cell, `header-${i}-${column}`)}</th>)}</tr></thead>
+          <tbody>{rows.map((row, rowIndex) => <tr key={`row-${rowIndex}`}>{row.map((cell, column) => <td key={`cell-${rowIndex}-${column}`}>{inline(cell, `cell-${i}-${rowIndex}-${column}`)}</td>)}</tr>)}</tbody>
+        </table>,
+      );
       continue;
     }
     const unordered = line.match(/^\s*[-*+]\s+(.+)$/);
@@ -126,6 +157,9 @@ export function MarkdownContent({ children }: { children: string }) {
         "& pre": { my: 1.25, p: 1.5, overflowX: "auto", borderRadius: 2, bgcolor: "#111827", color: "#F8FAFC" },
         "& pre code": { p: 0, bgcolor: "transparent", color: "inherit" },
         "& blockquote": { my: 1.25, mx: 0, pl: 1.5, borderLeft: "3px solid", borderColor: "primary.light", color: "text.secondary" },
+        "& table": { my: 1.25, width: "100%", borderCollapse: "collapse", display: "block", overflowX: "auto", fontSize: "0.88rem" },
+        "& th, & td": { px: 1.25, py: 0.8, minWidth: 120, border: "1px solid", borderColor: "divider", textAlign: "left", verticalAlign: "top" },
+        "& th": { bgcolor: "#F8F9FB", fontWeight: 750, whiteSpace: "nowrap" },
         "& hr": { my: 2, border: 0, borderTop: "1px solid", borderColor: "divider" },
       }}
     >

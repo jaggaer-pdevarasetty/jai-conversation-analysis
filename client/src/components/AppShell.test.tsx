@@ -22,6 +22,7 @@ describe("Overview ID search", () => {
   it("routes conversation UUIDs and tenant IDs to their records", () => {
     expect(idSearchHref("4512ec35-9164-4225-a7eb-06c1a26cf652")).toBe("/conversations/4512ec35-9164-4225-a7eb-06c1a26cf652");
     expect(idSearchHref("20256789")).toBe("/tenants/20256789");
+    expect(idSearchHref("not-an-id")).toBeNull();
   });
 });
 
@@ -34,6 +35,7 @@ describe("AppShell", () => {
     expect(screen.getByRole("link", { name: "Tenants" })).toHaveAttribute("href", "/tenants");
     expect(screen.getByRole("link", { name: "Review queue" })).toHaveAttribute("href", "/conversations");
     expect(screen.getByText("Operational overview")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Region" })).toHaveTextContent("All regions");
   });
 
   it("returns to the overview when the region changes", async () => {

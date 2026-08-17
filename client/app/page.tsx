@@ -27,9 +27,10 @@ import {
 } from "@mui/material";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { idSearchHref } from "../src/components/AppShell";
 import { CATEGORY_META, CategoryChip } from "../src/components/CategoryChip";
+import { MarkdownContent } from "../src/components/MarkdownContent";
 import { useRegion } from "../src/components/RegionContext";
 import { StatCard } from "../src/components/StatCard";
 import {
@@ -76,10 +77,13 @@ export default function OverviewPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [idSearch, setIdSearch] = useState("");
+  const [idSearchError, setIdSearchError] = useState(false);
+  const requestId = useRef(0);
   const router = useRouter();
   const { region, loading: regionLoading } = useRegion();
 
   const load = useCallback(async () => {
+    const currentRequest = ++requestId.current;
     setLoading(true);
     setError(null);
     const [analysisResult, overviewResult, runResult] = await Promise.allSettled([
@@ -87,6 +91,7 @@ export default function OverviewPage() {
       fetchOverview(region),
       fetchLatestRun(),
     ]);
+    if (currentRequest !== requestId.current) return;
     if (analysisResult.status === "rejected") {
       setError("The analysis service could not be reached. Check that the API is running, then try again.");
       setLoading(false);
@@ -109,7 +114,7 @@ export default function OverviewPage() {
 
   if (loading) {
     return (
-      <Stack spacing={3} aria-label="Loading overview">
+      <Stack spacing={3} role="status" aria-label="Loading overview">
         <Skeleton variant="rounded" height={112} />
         <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", xl: "repeat(3, 1fr)" }, gap: 2 }}>
           {[1, 2, 3, 4, 5, 6].map((item) => <Skeleton key={item} variant="rounded" height={136} />)}
@@ -156,9 +161,12 @@ export default function OverviewPage() {
             component="form"
             onSubmit={(event) => {
               event.preventDefault();
-              if (idSearch.trim()) router.push(idSearchHref(idSearch));
+              const href = idSearchHref(idSearch);
+              setIdSearchError(href === null);
+              if (href) router.push(href);
             }}
-            sx={{ mt: 2, display: "flex", gap: 1, width: "100%", maxWidth: 620 }}
+            aria-label="Find a conversation or tenant"
+            sx={{ mt: 2, display: "flex", flexDirection: { xs: "column", sm: "row" }, gap: 1, width: "100%", maxWidth: 620 }}
           >
             <TextField
               fullWidth
@@ -167,10 +175,12 @@ export default function OverviewPage() {
               label="Find conversation or tenant"
               placeholder="Conversation UUID or tenant ID"
               value={idSearch}
-              onChange={(event) => setIdSearch(event.target.value)}
+              error={idSearchError}
+              helperText={idSearchError ? "Enter a conversation UUID or numeric tenant ID." : undefined}
+              onChange={(event) => { setIdSearch(event.target.value); setIdSearchError(false); }}
               InputProps={{ startAdornment: <InputAdornment position="start"><SearchRoundedIcon fontSize="small" /></InputAdornment> }}
             />
-            <Button type="submit" variant="contained">Find</Button>
+            <Button type="submit" variant="contained" sx={{ width: { xs: "100%", sm: "auto" } }}>Find</Button>
           </Box>
         </Box>
         <Stack direction="row" spacing={1.25} flexWrap="wrap" useFlexGap>
@@ -285,7 +295,7 @@ export default function OverviewPage() {
                 <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.25, whiteSpace: "nowrap" }}>{formatDate(item.analyzed_at)}</Typography>
               </Box>
               <Box sx={{ display: { xs: "none", lg: "block" }, minWidth: 0 }}><CategoryChip category={item.category} /></Box>
-              <Typography variant="body2" color="text.secondary" sx={{ display: { xs: "none", lg: "block" }, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.recommended_next_step}</Typography>
+              <Box sx={{ display: { xs: "none", lg: "block" }, maxHeight: 48, overflow: "hidden", color: "text.secondary" }}><MarkdownContent>{item.recommended_next_step}</MarkdownContent></Box>
               <Button component={Link} href={`/conversations/${item.conversation_id}`} size="small" aria-label={`Review conversation ${item.conversation_id}`}>Review</Button>
             </Box>
             {index < recent.length - 1 && <Divider />}

@@ -49,6 +49,7 @@ describe("FeedbackPage", () => {
   it("loads newest conversation activity first and labels both dates", async () => {
     render(<FeedbackPage />);
     await waitFor(() => expect(mockFetchFeedback).toHaveBeenCalledWith(expect.objectContaining({ sort: "newest" })));
+    expect(screen.getByRole("combobox", { name: "Activity period" })).toHaveTextContent("All time");
     expect(screen.getByText(/Last message/)).toBeInTheDocument();
     expect(screen.getByText(/Analysed/)).toBeInTheDocument();
   });
@@ -60,6 +61,14 @@ describe("FeedbackPage", () => {
     await userEvent.click(screen.getByLabelText("Sentiment"));
     await userEvent.click(await screen.findByRole("option", { name: "Negative" }));
     await waitFor(() => expect(mockFetchFeedback).toHaveBeenLastCalledWith(expect.objectContaining({ rating: "negative" })));
+  });
+
+  it("filters by tenant and the last seven days", async () => {
+    render(<FeedbackPage />);
+    await userEvent.type(await screen.findByLabelText("Tenant name"), "Acme");
+    await userEvent.click(screen.getByLabelText("Activity period"));
+    await userEvent.click(await screen.findByRole("option", { name: "Last 7 days" }));
+    await waitFor(() => expect(mockFetchFeedback).toHaveBeenLastCalledWith(expect.objectContaining({ tenant: "Acme", date_range: "last_7_days" })));
   });
 
   it("requests oldest conversation activity when selected", async () => {

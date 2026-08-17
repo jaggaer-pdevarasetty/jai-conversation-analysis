@@ -155,6 +155,10 @@ export interface FeedbackQuery {
   region?: string;
   scope?: string;
   query?: string;
+  tenant?: string;
+  date_range?: string;
+  date_from?: string;
+  date_to?: string;
   sort?: string;
   limit?: number;
   offset?: number;

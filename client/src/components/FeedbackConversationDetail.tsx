@@ -55,6 +55,22 @@ function roleLabel(role: string): string {
   return "User";
 }
 
+function suggestionsMarkdown(value?: string): string | undefined {
+  const text = value?.trim();
+  if (!text?.startsWith("[") || !text.endsWith("]")) return value;
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (Array.isArray(parsed) && parsed.every((item) => typeof item === "string")) return parsed.map((item) => `- ${item}`).join("\n");
+  } catch {
+    const items = text.slice(1, -1)
+      .split(/"\s*,\s*"|'\s*,\s*'|"\s*,\s*'|'\s*,\s*"/)
+      .map((item) => item.replace(/^["']|["']$/g, "").replace(/\\(["'])/g, "$1").trim())
+      .filter(Boolean);
+    if (items.length > 1) return items.map((item) => `- ${item}`).join("\n");
+  }
+  return value;
+}
+
 function AnalysisSection({ title, body, accent = false }: { title: string; body?: string; accent?: boolean }) {
   if (!body?.trim()) return null;
   return (
@@ -86,19 +102,26 @@ export function FeedbackConversationDetail({
   const [detail, setDetail] = useState<ConversationDetail | null>(initialDetail ?? null);
   const [feedbackItem, setFeedbackItem] = useState<FeedbackItem | null>(initialFeedback ?? null);
   const [error, setError] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     if (initialDetail && initialFeedback) return;
+    let active = true;
+    setDetail(null);
+    setFeedbackItem(null);
+    setError(null);
     Promise.all([fetchFeedbackConversation(id), fetchFeedbackItem(id)])
       .then(([conversation, feedback]) => {
+        if (!active) return;
         setDetail(conversation);
         setFeedbackItem(feedback);
       })
-      .catch(() => setError("This feedback conversation could not be loaded from the current API response."));
-  }, [id, initialDetail, initialFeedback]);
+      .catch(() => { if (active) setError("This feedback conversation could not be loaded from the current API response."); });
+    return () => { active = false; };
+  }, [id, initialDetail, initialFeedback, reload]);
 
-  if (error) return <Alert severity="error"><AlertTitle>Feedback detail unavailable</AlertTitle>{error}</Alert>;
-  if (!detail || !feedbackItem) return <Stack spacing={2.5} aria-label="Loading feedback conversation"><Skeleton variant="rounded" height={130} /><Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "1.5fr .75fr" }, gap: 2.5 }}><Skeleton variant="rounded" height={650} /><Skeleton variant="rounded" height={520} /></Box></Stack>;
+  if (error) return <Alert severity="error" action={<Button color="inherit" onClick={() => setReload((value) => value + 1)}>Try again</Button>}><AlertTitle>Feedback detail unavailable</AlertTitle>{error}</Alert>;
+  if (!detail || !feedbackItem) return <Stack spacing={2.5} role="status" aria-label="Loading feedback conversation"><Skeleton variant="rounded" height={130} /><Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "1.5fr .75fr" }, gap: 2.5 }}><Skeleton variant="rounded" height={650} /><Skeleton variant="rounded" height={520} /></Box></Stack>;
 
   const positive = feedbackItem.rating === true;
   const source = detail.source ?? feedbackItem;
@@ -198,7 +221,7 @@ export function FeedbackConversationDetail({
                 <AnalysisSection title="What happened" body={deep.what_happened} />
                 <AnalysisSection title="Why it happened" body={deep.why_it_happened} accent />
                 <AnalysisSection title="How to avoid it" body={deep.how_to_avoid} />
-                <AnalysisSection title="Suggestions" body={deep.suggestions} />
+                <AnalysisSection title="Suggestions" body={suggestionsMarkdown(deep.suggestions)} />
               </Stack>
             ) : <Alert severity="info" sx={{ mt: 2 }}>Deep analysis is not available in the API response yet.</Alert>}
           </Paper>

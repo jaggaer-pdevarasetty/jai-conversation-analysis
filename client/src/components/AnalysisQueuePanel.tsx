@@ -48,7 +48,7 @@ export function AnalysisQueuePanel() {
     return () => clearInterval(timer);
   }, [load]);
 
-  if (!data && !error) return <Skeleton variant="rounded" height={150} aria-label="Loading analysis queue" />;
+  if (!data && !error) return <Skeleton variant="rounded" height={150} role="status" aria-label="Loading analysis queue" />;
   if (!data) return <Alert severity="warning">Live analysis queue status is temporarily unavailable.</Alert>;
 
   return (

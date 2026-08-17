@@ -81,13 +81,18 @@ export function ConversationDetail({ id, initial }: { id: string; initial?: Deta
   const [override, setOverride] = useState<string>("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     if (initial) return;
+    let active = true;
+    setDetail(null);
+    setError(null);
     fetchConversation(id)
-      .then(setDetail)
-      .catch(() => setError("The conversation could not be loaded. Check the API connection and try again."));
-  }, [id, initial]);
+      .then((result) => { if (active) setDetail(result); })
+      .catch(() => { if (active) setError("The conversation could not be loaded. Check the API connection and try again."); });
+    return () => { active = false; };
+  }, [id, initial, reload]);
 
   async function saveOverride() {
     if (!override) return;
@@ -106,12 +111,12 @@ export function ConversationDetail({ id, initial }: { id: string; initial?: Deta
   }
 
   if (error && !detail) {
-    return <Alert severity="error"><AlertTitle>Conversation unavailable</AlertTitle>{error}</Alert>;
+    return <Alert severity="error" action={<Button color="inherit" onClick={() => setReload((value) => value + 1)}>Try again</Button>}><AlertTitle>Conversation unavailable</AlertTitle>{error}</Alert>;
   }
 
   if (!detail) {
     return (
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "minmax(0, 1.5fr) minmax(340px, .75fr)" }, gap: 2.5 }} aria-label="Loading conversation">
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "minmax(0, 1.5fr) minmax(340px, .75fr)" }, gap: 2.5 }} role="status" aria-label="Loading conversation">
         <Skeleton variant="rounded" height={620} />
         <Skeleton variant="rounded" height={500} />
       </Box>

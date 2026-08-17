@@ -32,8 +32,10 @@ export function RegionProvider({ children }: { children: ReactNode }) {
     fetchRegions()
       .then((items) => {
         setRegions(items);
-        // Keep a saved region only if it is still configured; else default to all.
-        if (saved && items.some((r) => r.label === saved)) setRegionState(saved);
+        // Keep a saved region only if it is still reachable; else default to all.
+        const next = saved && items.some((r) => r.label === saved && r.reachable !== false) ? saved : "";
+        setRegionState(next);
+        if (typeof window !== "undefined") window.localStorage.setItem(STORAGE_KEY, next);
       })
       .catch(() => setRegions([]))
       .finally(() => setLoading(false));

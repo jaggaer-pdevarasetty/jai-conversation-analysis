@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToString } from "react-dom/server";
-import type { ConversationDetail as Detail } from "../services/analysisApi";
+import { fetchConversation, type ConversationDetail as Detail } from "../services/analysisApi";
 import { ConversationDetail } from "./ConversationDetail";
 import { MarkdownContent } from "./MarkdownContent";
 
@@ -22,7 +22,7 @@ const record: Detail = {
   metrics: { ttft_ms: 11440, input_tokens: 35293, output_tokens: 6186, prompt_tokens: 35293 },
   messages: [
     { id: "m1", role: "user", content: "How do I reset my password?", sequence_num: 1, model: null, created_at: "" },
-    { id: "m2", role: "assistant", content: "Go to **Settings**:\n\n1. Open Security.\n2. Choose Password.", sequence_num: 2, model: "gemini", created_at: "" },
+    { id: "m2", role: "assistant", content: "Go to **Settings**:\n\n1. Open Security.\n2. Choose Password.\n\n| Requisition Number | Status |\n| ---: | --- |\n| 3917582 | Pending |", sequence_num: 2, model: "gemini", created_at: "" },
   ],
   feedback: { rating: null, comment: null, message_id: null },
 };
@@ -34,7 +34,10 @@ jest.mock("../services/analysisApi", () => ({
   overrideCategory: (...args: [string, string, string]) => overrideMock(...args),
 }));
 
+const fetchConversationMock = fetchConversation as jest.MockedFunction<typeof fetchConversation>;
+
 describe("ConversationDetail", () => {
+  beforeEach(() => fetchConversationMock.mockReset().mockResolvedValue(record));
   it("shows transcript, review evidence, confidence and formatted metrics", async () => {
     render(<ConversationDetail id="abc123" initial={record} />);
     expect(screen.getByText("Improve the password-reset answer.")).toBeInTheDocument();
@@ -45,6 +48,8 @@ describe("ConversationDetail", () => {
     expect(screen.getByText("The user repeated the same question.")).toBeInTheDocument();
     expect(screen.getByText("Settings").tagName).toBe("STRONG");
     expect(screen.getByRole("list")).toBeInTheDocument();
+    expect(screen.getByRole("table")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Requisition Number" })).toBeInTheDocument();
     expect(screen.queryByText(/\*\*Settings\*\*/)).not.toBeInTheDocument();
   });
 
@@ -56,6 +61,14 @@ describe("ConversationDetail", () => {
     } finally {
       consoleError.mockRestore();
     }
+  });
+
+  it("retries a failed detail request", async () => {
+    fetchConversationMock.mockRejectedValueOnce(new Error("offline"));
+    render(<ConversationDetail id="abc123" />);
+    expect(await screen.findByText("Conversation unavailable")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("How do I reset my password?")).toBeInTheDocument();
   });
 
   it("submits a human override", async () => {

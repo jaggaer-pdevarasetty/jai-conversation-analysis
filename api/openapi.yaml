@@ -40,6 +40,10 @@ paths:
         - { name: rating, in: query, required: false, schema: { type: string, enum: [positive, negative] } }
         - { name: category, in: query, required: false, schema: { $ref: '#/components/schemas/Category' } }
         - { name: query, in: query, required: false, schema: { type: string }, description: Search feedback, source metadata, recommendation, or conversation ID. }
+        - { name: tenant, in: query, required: false, schema: { type: string }, description: Case-insensitive tenant-name filter. }
+        - { name: date_range, in: query, required: false, schema: { type: string, enum: [last_7_days, last_30_days] } }
+        - { name: date_from, in: query, required: false, schema: { type: string, format: date } }
+        - { name: date_to, in: query, required: false, schema: { type: string, format: date } }
         - { name: sort, in: query, required: false, schema: { type: string, enum: [newest, oldest, negative_first], default: newest } }
         - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 10 } }
         - { name: offset, in: query, required: false, schema: { type: integer, minimum: 0, default: 0 } }

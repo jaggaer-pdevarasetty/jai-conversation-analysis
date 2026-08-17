@@ -7,6 +7,7 @@ RBAC: reviewer-only (gate configurable). RFC 7807 error bodies.
 from __future__ import annotations
 
 from dataclasses import asdict
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -297,6 +298,10 @@ def feedback_conversations(
     rating: str | None = Query(default=None, pattern="^(positive|negative)$"),
     category: str | None = Query(default=None),
     query: str | None = Query(default=None, max_length=200),
+    tenant: str | None = Query(default=None, max_length=200),
+    date_range: str | None = Query(default=None, pattern="^(last_7_days|last_30_days)$"),
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
     sort: str = Query(default="newest", pattern="^(newest|oldest|negative_first)$"),
     limit: int = Query(default=10, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
@@ -312,6 +317,8 @@ def feedback_conversations(
         return bad
     if category is not None and category not in CATEGORIES:
         return problem_response(400, "Invalid category", f"Unknown category: {category}")
+    if date_from and date_to and date_from > date_to:
+        return problem_response(400, "Invalid date range", "date_from must be on or before date_to")
     items = []
     records = store.list(region=region)
     conversations = store.get_conversations([record.conversation_id for record in records])
@@ -371,8 +378,11 @@ def feedback_conversations(
             item.update(meta.get(item["conversation_id"], {}))
 
     text_query = (query or "").strip().lower()
-    if text_query:
+    tenant_query = (tenant or "").strip().lower()
+    needs_meta = bool(text_query or tenant_query or date_range or date_from or date_to)
+    if needs_meta:
         _enrich(items)
+    if text_query:
         items = [
             item for item in items
             if any(
@@ -382,6 +392,28 @@ def feedback_conversations(
                     "recommended_next_step", "why_it_happened",
                 )
             )
+        ]
+    if tenant_query:
+        items = [item for item in items if tenant_query in str(item.get("tenant_name") or "").lower()]
+
+    range_start = date_from
+    range_end = date_to
+    if date_range:
+        range_end = datetime.now(timezone.utc).date()
+        range_start = range_end - timedelta(days=6 if date_range == "last_7_days" else 29)
+    if range_start or range_end:
+        def _activity_day(item):
+            value = item.get("last_message_at") or item.get("analyzed_at")
+            if not value:
+                return None
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return parsed.date()
+
+        items = [
+            item for item in items
+            if (day := _activity_day(item)) is not None
+            and (range_start is None or day >= range_start)
+            and (range_end is None or day <= range_end)
         ]
 
     def _rank(item) -> int:  # thumbs-down first, then negative outcomes, then thumbs-up, then rest
@@ -401,7 +433,7 @@ def feedback_conversations(
         items.sort(key=_rank)
     total = len(items)
     page = items[offset : offset + limit]
-    if not text_query:
+    if not needs_meta:
         _enrich(page)
     return {
         "items": page,

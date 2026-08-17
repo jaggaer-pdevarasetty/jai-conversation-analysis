@@ -68,7 +68,7 @@ export default function TenantUsersPage() {
   }
 
   if (!users) {
-    return <Stack spacing={2.5} aria-label="Loading tenant users"><Skeleton variant="rounded" height={120} /><Skeleton variant="rounded" height={320} /></Stack>;
+    return <Stack spacing={2.5} role="status" aria-label="Loading tenant users"><Skeleton variant="rounded" height={120} /><Skeleton variant="rounded" height={320} /></Stack>;
   }
 
   const conversations = users.reduce((total, user) => total + user.conversations, 0);
@@ -131,6 +131,7 @@ export default function TenantUsersPage() {
                 textDecoration: "none",
                 transition: "border-color 150ms ease, box-shadow 150ms ease",
                 "&:hover": { borderColor: "primary.main", boxShadow: "0 7px 20px rgba(16, 24, 40, 0.07)" },
+                "&:focus-visible": { outline: "3px solid", outlineColor: "primary.light", outlineOffset: 2 },
               }}
             >
               <Avatar sx={{ bgcolor: "#EEF2F7", color: "secondary.main", fontWeight: 750 }}>{user.user_name.trim().charAt(0).toUpperCase() || "U"}</Avatar>
@@ -149,9 +150,9 @@ export default function TenantUsersPage() {
       ) : (
         <Paper sx={{ py: 8, px: 3, textAlign: "center" }}>
           <SearchRoundedIcon sx={{ fontSize: 36, color: "text.disabled" }} />
-          <Typography variant="h3" sx={{ mt: 1 }}>No users match</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>Try another name, user ID, or role.</Typography>
-          <Button sx={{ mt: 2 }} onClick={() => { setSearch(""); setRole(""); }}>Clear filters</Button>
+          <Typography variant="h3" sx={{ mt: 1 }}>{users.length ? "No users match" : "No users available"}</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{users.length ? "Try another name, user ID, or role." : "This tenant has no users with conversation history."}</Typography>
+          {users.length > 0 && <Button sx={{ mt: 2 }} onClick={() => { setSearch(""); setRole(""); }}>Clear filters</Button>}
         </Paper>
       )}
     </Stack>

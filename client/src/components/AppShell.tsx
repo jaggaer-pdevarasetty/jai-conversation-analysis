@@ -29,10 +29,12 @@ import { RegionSelect } from "./RegionSelect";
 
 const DRAWER_WIDTH = 264;
 const CONVERSATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const TENANT_ID = /^\d+$/;
 
-export function idSearchHref(input: string): string {
+export function idSearchHref(input: string): string | null {
   const id = input.trim();
-  return `${CONVERSATION_ID.test(id) ? "/conversations" : "/tenants"}/${encodeURIComponent(id)}`;
+  if (CONVERSATION_ID.test(id)) return `/conversations/${encodeURIComponent(id)}`;
+  return TENANT_ID.test(id) ? `/tenants/${encodeURIComponent(id)}` : null;
 }
 
 const NAV = [
@@ -168,8 +170,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           >
             <MenuRoundedIcon />
           </IconButton>
-          <Typography sx={{ fontSize: 15, fontWeight: 720 }}>{pageTitle}</Typography>
-          <Stack direction="row" spacing={1.25} alignItems="center" sx={{ ml: "auto" }}>
+          <Typography sx={{ display: { xs: "none", sm: "block" }, fontSize: 15, fontWeight: 720, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pageTitle}</Typography>
+          <Stack direction="row" spacing={{ xs: 0.75, sm: 1.25 }} alignItems="center" sx={{ ml: "auto", minWidth: 0 }}>
             <RegionSelect />
             <Chip
               icon={tenantView ? <AdminPanelSettingsOutlinedIcon /> : <LockOutlinedIcon />}

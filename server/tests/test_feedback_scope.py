@@ -1,5 +1,7 @@
 """/feedback scope: thumbs (default) vs outcomes vs all + validation."""
 
+from datetime import datetime, timezone
+
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -40,6 +42,42 @@ def test_feedback_defaults_to_latest_conversation_activity():
     body = client.get("/api/analysis/feedback", params={"limit": 100}).json()
     dates = [item["last_message_at"] or item["analyzed_at"] for item in body["items"]]
     assert dates == sorted(dates, reverse=True)
+
+
+def test_feedback_filters_by_tenant_and_activity_date(monkeypatch):
+    initial = client.get("/api/analysis/feedback", params={"limit": 100}).json()["items"]
+    ids = [item["conversation_id"] for item in initial]
+    today = datetime.now(timezone.utc).date().isoformat()
+    monkeypatch.setattr(
+        "app.dashboard.conversation_meta",
+        lambda conversation_ids, region=None: {
+            cid: {
+                "tenant_name": "Acme" if index == 0 else "Other",
+                "last_message_at": f"{today}T12:00:00+00:00",
+            }
+            for index, cid in enumerate(conversation_ids)
+        },
+    )
+
+    tenant = client.get(
+        "/api/analysis/feedback", params={"tenant": "acme", "limit": 100}
+    ).json()
+    assert tenant["items"] and all(item["tenant_name"] == "Acme" for item in tenant["items"])
+
+    recent = client.get(
+        "/api/analysis/feedback", params={"date_range": "last_7_days", "limit": 100}
+    ).json()
+    assert {item["conversation_id"] for item in recent["items"]} == set(ids)
+
+    custom = client.get(
+        "/api/analysis/feedback",
+        params={"date_from": today, "date_to": today, "limit": 100},
+    ).json()
+    assert {item["conversation_id"] for item in custom["items"]} == set(ids)
+    assert client.get(
+        "/api/analysis/feedback",
+        params={"date_from": "2026-08-14", "date_to": "2026-08-13"},
+    ).status_code == 400
 
 
 def test_feedback_searches_by_conversation_id():

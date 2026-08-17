@@ -201,6 +201,26 @@ non-English handling. Working on branch **`feature/J1-93353-conversation-analysi
 - Green: **client 22 jest + typecheck + lint + production build; server 81 pytest, 3 skipped;
   OpenAPI YAML valid; read-only posture guard passed**.
 
+## Done — execution increment 16 (whole-frontend UI/UX audit)
+- Fixed the blank All-regions selector with explicit empty-value rendering, a real combobox label,
+  loading/disabled state, and fallback when a saved region becomes unreachable.
+- Prevented small-screen app-bar/search overflow, validated overview ID searches, guarded stale overview
+  and detail responses, and added retry actions to both conversation detail experiences.
+- Rendered remaining recommendation fields as safe Markdown; clarified unfiltered empty states, added
+  keyboard focus treatment, explicit table scrolling, and announced loading states to assistive technology.
+- Audited every frontend route and restarted the dev server only after a clean production build.
+- Green: **client 24 jest + typecheck + lint + production build**; all eight frontend routes return 200.
+
+## Done — execution increment 17 (feedback tenant/date filters + Markdown tables)
+- Added server-backed feedback filters for tenant name, Last 7 days, Last 30 days, and custom
+  activity-date ranges; updated the OpenAPI contract and responsive filter layout.
+- Extended the safe Markdown renderer with scrollable pipe tables while continuing to strip raw HTML;
+  serialized suggestion arrays now display as formatted bullet lists.
+- Verified the reported conversation live: University of Utah, Last 7 days, and Aug 13 custom-date
+  filters all return it, and the feedback list/detail routes return 200 after service restarts.
+- Green: **client 25 jest + typecheck + lint + production build; server 82 pytest, 3 skipped;
+  OpenAPI YAML valid; read-only posture guard passed**.
+
 ## Next
 1. Repopulate `analysis` from `chatdb` via Vertex + restart backend (approved) → UI shows real data.
 2. Fix `.env`: `CHAT_DB_URL` db = `jai_agentos_uit`, `CHAT_DB_SCHEMA=jai_agentos_schema_uit`, `SOURCE=chatdb`.
