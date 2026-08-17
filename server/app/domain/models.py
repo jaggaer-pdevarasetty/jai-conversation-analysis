@@ -9,7 +9,7 @@ Two sides, separated on purpose (ADR-0007):
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Optional
 
 Role = Literal["system", "user", "assistant", "live_agent"]
@@ -70,6 +70,8 @@ class Conversation:
     # Hints sourced from LangSmith (router intent / frustration) in production.
     out_of_scope_intent: bool = False
     frustrated: bool = False
+    # Orchestrator + LangSmith enrichment (safe/scrubbed), attached before analysis.
+    enrichment: "Optional[Enrichment]" = None
 
 
 @dataclass
@@ -80,6 +82,31 @@ class Signals:
     error: bool
     out_of_scope_intent: bool
     frustrated: bool
+
+
+@dataclass
+class Enrichment:
+    """Safe, PII-scrubbed signals from the JAI orchestrator + LangSmith traces (ADR-0018).
+
+    Everything here is either non-personal metadata (intent, agent, flags) or free text that
+    has already been PII/quasi-identifier scrubbed. Secrets (JWT/keys/URLs) and raw identifiers
+    are NEVER stored here — see enrichment.py / orchestrator_profile.py."""
+
+    intent: Optional[str] = None            # router intent, e.g. knowledge_search
+    secondary_intent: Optional[str] = None
+    agent_used: Optional[str] = None        # rag / ticket / ticket_status / ...
+    response_type: Optional[str] = None     # answer / refusal / handoff
+    source_confidence: Optional[str] = None  # the agent's own confidence (HIGH/MEDIUM/LOW)
+    retrieval_hit: Optional[bool] = None    # did the knowledge base return any docs?
+    retrieved_count: int = 0
+    retrieved_docs: list[str] = field(default_factory=list)  # doc file names (identifiers)
+    reasoning_summary: str = ""             # scrubbed + truncated agent reasoning
+    frustration_score: Optional[float] = None
+    guardrail: Optional[str] = None         # refusal/handoff/guardrail note
+    had_error: Optional[bool] = None
+    turns: Optional[int] = None
+    tenant_rules_applied: bool = False      # were tenant scope rules available for this convo?
+    langsmith_found: bool = False           # did we actually match a LangSmith trace?
 
 
 @dataclass
@@ -129,6 +156,7 @@ class AnalysisRecord:
     tenant_id: str = ""  # kept for tenant analytics (a company, not a person)
     override: Optional[Override] = None
     deep: Optional[DeepAnalysis] = None  # populated only when the conversation has feedback
+    enrichment: Optional[Enrichment] = None  # safe/scrubbed orchestrator + LangSmith signals
 
     @property
     def category(self) -> Category:

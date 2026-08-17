@@ -214,12 +214,34 @@ components:
             analyzer_version: { type: string }
             analyzed_at: { type: string, format: date-time }
         metrics: { $ref: '#/components/schemas/Metrics' }
+        enrichment: { anyOf: [{ $ref: '#/components/schemas/Enrichment' }, { type: 'null' }] }
         messages: { type: array, items: { $ref: '#/components/schemas/Message' } }
         feedback:
           type: object
           properties:
             rating: { type: [boolean, 'null'] }
             comment: { type: [string, 'null'] }
+    Enrichment:
+      type: object
+      description: >-
+        Safe, PII/quasi-identifier-scrubbed signals from the JAI orchestrator + LangSmith traces
+        (ADR-0018). No secrets (JWT/keys/URLs) or raw identifiers are ever included.
+      properties:
+        intent: { type: [string, 'null'] }
+        secondary_intent: { type: [string, 'null'] }
+        agent_used: { type: [string, 'null'] }
+        response_type: { type: [string, 'null'] }
+        source_confidence: { type: [string, 'null'] }
+        retrieval_hit: { type: [boolean, 'null'] }
+        retrieved_count: { type: integer }
+        retrieved_docs: { type: array, items: { type: string } }
+        reasoning_summary: { type: string }
+        frustration_score: { type: [number, 'null'] }
+        guardrail: { type: [string, 'null'] }
+        had_error: { type: [boolean, 'null'] }
+        turns: { type: [integer, 'null'] }
+        tenant_rules_applied: { type: boolean }
+        langsmith_found: { type: boolean }
     OverrideBody:
       type: object
       required: [category, actor]

@@ -32,6 +32,7 @@ from .domain.models import (
     Category,
     CommonConversation,
     DeepAnalysis,
+    Enrichment,
     Feedback,
     Message,
     Metrics,
@@ -79,6 +80,7 @@ def _row_to_rec(data: dict) -> AnalysisRecord:
     d["metrics"] = Metrics(**d["metrics"])
     d["override"] = Override(**d["override"]) if d.get("override") else None
     d["deep"] = DeepAnalysis(**d["deep"]) if d.get("deep") else None
+    d["enrichment"] = Enrichment(**d["enrichment"]) if d.get("enrichment") else None
     return AnalysisRecord(**d)
 
 
