@@ -617,11 +617,25 @@ def queue_stats(
     return analysis_queue.stats(limit=limit, offset=offset)
 
 
+@api.get("/analyze/pending")
+def analyze_pending():
+    """Step 1 of the manual flow: FETCH (don't analyse) all eligible, not-yet-analysed
+    conversations across regions and return the count. The UI then shows a 'Start analysis'
+    button, which calls POST /analyze/sweep."""
+    if settings.source != "chatdb":
+        return {"count": 0, "ids": [], "source": settings.source}
+    from .chatdb import eligible_conversation_ids
+
+    analysed = store.analysed_ids()
+    pending = [cid for cid in eligible_conversation_ids() if cid not in analysed]
+    return {"count": len(pending), "ids": pending[:1000], "source": settings.source}
+
+
 @api.post("/analyze/sweep", status_code=202)
 def analyze_sweep():
-    """MANUAL trigger: check the chat DB and analyse every not-yet-analysed conversation
-    (deduped; already-analysed ones are skipped). Runs in the background — poll GET /queue for
-    progress. Returns 'already_running' if a sweep is still in flight."""
+    """Step 2 of the manual flow: check the chat DB and analyse every not-yet-analysed
+    conversation (deduped; already-analysed ones are skipped). Runs in the background — poll
+    GET /queue for progress. Returns 'already_running' if a sweep is still in flight."""
     if settings.source != "chatdb":
         return problem_response(400, "Not available", "Manual analysis applies to the chat DB source only.")
     started = trigger_sweep()

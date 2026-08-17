@@ -17,6 +17,14 @@ def test_manual_sweep_is_chatdb_only():
     assert r.json()["title"] == "Not available"
 
 
+def test_analyze_pending_returns_a_count():
+    # step 1 of the flow: fetch (don't analyse) — safe on the fixtures source (count 0)
+    r = client.get("/api/analysis/analyze/pending")
+    assert r.status_code == 200
+    body = r.json()
+    assert "count" in body and body["count"] == 0
+
+
 def test_trigger_sweep_runs_once_and_dedupes(monkeypatch):
     monkeypatch.setattr(main_module, "_sweep_running", False, raising=False)
     started, release, calls = threading.Event(), threading.Event(), []

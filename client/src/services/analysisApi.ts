@@ -234,8 +234,16 @@ export async function fetchConversation(id: string): Promise<ConversationDetail>
   return getJson<ConversationDetail>(`/api/analysis/conversations/${encodeURIComponent(id)}`);
 }
 
-/** Manual trigger: check the chat DB and analyse all not-yet-analysed conversations in the
- * background (deduped). Returns the server status ("started" | "already_running"). */
+/** Step 1: fetch (don't analyse) the count of new / unanalysed conversations. */
+export async function fetchPending(): Promise<{ count: number; ids: string[] }> {
+  const res = await fetch(`${API_BASE}/api/analysis/analyze/pending`);
+  if (!res.ok) throw new Error(`Fetch pending failed: ${res.status}`);
+  const data = (await res.json()) as { count?: number; ids?: string[] };
+  return { count: data.count ?? 0, ids: data.ids ?? [] };
+}
+
+/** Step 2: start the background analysis of all not-yet-analysed conversations (deduped).
+ * Returns the server status ("started" | "already_running"). */
 export async function triggerSweep(): Promise<string> {
   const res = await fetch(`${API_BASE}/api/analysis/analyze/sweep`, { method: "POST" });
   if (!res.ok) throw new Error(`Analyse sweep failed: ${res.status}`);

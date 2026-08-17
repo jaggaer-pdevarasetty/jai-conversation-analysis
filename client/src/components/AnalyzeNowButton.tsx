@@ -1,65 +1,118 @@
 "use client";
 
 import PlayArrowRoundedIcon from "@mui/icons-material/PlayArrowRounded";
-import { Alert, Button, CircularProgress, Snackbar } from "@mui/material";
+import {
+  Alert,
+  Button,
+  CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Stack,
+  Typography,
+} from "@mui/material";
 import { useState } from "react";
-import { triggerSweep } from "../services/analysisApi";
+import { fetchPending, triggerSweep } from "../services/analysisApi";
 
-type Toast = { msg: string; sev: "success" | "info" | "error" };
+type Phase = "fetching" | "fetched" | "starting" | "started" | "error";
 
-/** Manual trigger button: checks the chat DB and analyses all not-yet-analysed conversations
- * (background sweep). Used in the app bar and on the review queue. */
+/** Two-step manual analysis:
+ *  1. Click "Analyze" -> fetch all new / unanalysed conversations (loader).
+ *  2. After fetching, a "Start analysis" button appears -> click to analyse (loader),
+ *     then the live queue shows progress.
+ * Used in the app bar and on the review queue. */
 export function AnalyzeNowButton({
   variant = "contained",
   size = "small",
-  label = "Analyze now",
+  label = "Analyze",
 }: {
   variant?: "contained" | "outlined" | "text";
   size?: "small" | "medium";
   label?: string;
 }) {
-  const [busy, setBusy] = useState(false);
-  const [toast, setToast] = useState<Toast | null>(null);
+  const [open, setOpen] = useState(false);
+  const [phase, setPhase] = useState<Phase>("fetching");
+  const [count, setCount] = useState(0);
+  const [error, setError] = useState("");
 
-  const onClick = async () => {
-    setBusy(true);
+  const busy = phase === "fetching" || phase === "starting";
+
+  const openAndFetch = async () => {
+    setOpen(true);
+    setPhase("fetching");
+    setError("");
     try {
-      const status = await triggerSweep();
-      setToast(
-        status === "already_running"
-          ? { msg: "Analysis is already running — watch the live queue.", sev: "info" }
-          : { msg: "Analysis started — watch the live queue for progress.", sev: "success" },
-      );
+      const { count } = await fetchPending();
+      setCount(count);
+      setPhase("fetched");
     } catch {
-      setToast({ msg: "Couldn't start analysis. Is the API running?", sev: "error" });
-    } finally {
-      setBusy(false);
+      setError("Couldn't fetch conversations. Is the API running?");
+      setPhase("error");
     }
   };
 
+  const startAnalysis = async () => {
+    setPhase("starting");
+    try {
+      await triggerSweep();
+      setPhase("started");
+    } catch {
+      setError("Couldn't start analysis. Please try again.");
+      setPhase("error");
+    }
+  };
+
+  const close = () => {
+    if (!busy) setOpen(false);
+  };
+
+  const plural = count === 1 ? "" : "s";
+
   return (
     <>
-      <Button
-        variant={variant}
-        size={size}
-        onClick={onClick}
-        disabled={busy}
-        startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <PlayArrowRoundedIcon />}
-      >
-        {busy ? "Starting…" : label}
+      <Button variant={variant} size={size} startIcon={<PlayArrowRoundedIcon />} onClick={openAndFetch}>
+        {label}
       </Button>
-      <Snackbar
-        open={!!toast}
-        autoHideDuration={5000}
-        onClose={() => setToast(null)}
-        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-      >
-        {toast ? (
-          <Alert severity={toast.sev} variant="filled" onClose={() => setToast(null)}>
-            {toast.msg}
-          </Alert>
-        ) : undefined}
-      </Snackbar>
+
+      <Dialog open={open} onClose={close} maxWidth="xs" fullWidth aria-label="Analyze conversations">
+        <DialogTitle>Analyze conversations</DialogTitle>
+        <DialogContent>
+          {phase === "fetching" && (
+            <Stack direction="row" spacing={1.5} alignItems="center" sx={{ py: 1 }}>
+              <CircularProgress size={22} />
+              <Typography>Fetching new / unanalyzed conversations…</Typography>
+            </Stack>
+          )}
+          {phase === "fetched" && (
+            <Typography>
+              {count > 0
+                ? `Found ${count} new / unanalyzed conversation${plural} ready to analyze.`
+                : "Everything is already analyzed — no new conversations found."}
+            </Typography>
+          )}
+          {phase === "starting" && (
+            <Stack direction="row" spacing={1.5} alignItems="center" sx={{ py: 1 }}>
+              <CircularProgress size={22} />
+              <Typography>Starting analysis of {count} conversation{plural}…</Typography>
+            </Stack>
+          )}
+          {phase === "started" && (
+            <Alert severity="success">Analysis started — watch the live analysis queue for progress.</Alert>
+          )}
+          {phase === "error" && <Alert severity="error">{error}</Alert>}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={close} disabled={busy}>
+            {phase === "started" ? "Close" : "Cancel"}
+          </Button>
+          {phase === "fetched" && count > 0 && (
+            <Button variant="contained" startIcon={<PlayArrowRoundedIcon />} onClick={startAnalysis}>
+              Start analysis
+            </Button>
+          )}
+        </DialogActions>
+      </Dialog>
     </>
   );
 }
