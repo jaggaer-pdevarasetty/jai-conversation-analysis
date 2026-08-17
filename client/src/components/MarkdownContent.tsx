@@ -5,14 +5,24 @@ import { createElement, Fragment, type ReactNode } from "react";
 
 const INLINE = /(\*\*(.+?)\*\*|`([^`]+)`|\[([^\]]+)\]\(([^)\s]+)\)|\*([^*\n]+)\*|~~(.+?)~~)/g;
 
+// Only real HTML tag names — so "<tenant-id>", "x < 5 and y > 3", etc. are left intact.
+const HTML_TAG =
+  /<\/?(?:a|abbr|b|blockquote|br|code|del|div|em|h[1-6]|hr|i|img|li|ol|p|pre|s|small|span|strong|sub|sup|table|tbody|td|th|thead|tr|u|ul)\b[^>]*>/gi;
+
+// Unwrap <a href>text</a> to its text, then drop only recognised HTML tags. Applied to plain
+// text nodes ONLY (never code spans), so ordinary content and code are never deleted.
+function cleanTags(s: string): string {
+  return s.replace(/<a\b[^>]*>([\s\S]*?)<\/a>/gi, "$1").replace(HTML_TAG, "");
+}
+
 function inline(text: string, prefix: string): ReactNode[] {
-  const value = text.replace(/<a\b[^>]*>(.*?)<\/a>/gi, "$1").replace(/<[^>]+>/g, "");
+  const value = text;
   const nodes: ReactNode[] = [];
   let cursor = 0;
   let index = 0;
   for (const match of value.matchAll(INLINE)) {
     const start = match.index ?? 0;
-    if (start > cursor) nodes.push(value.slice(cursor, start));
+    if (start > cursor) nodes.push(cleanTags(value.slice(cursor, start)));
     const token = match[0];
     const key = `${prefix}-${index++}`;
     if (match[2] !== undefined) {
@@ -31,7 +41,7 @@ function inline(text: string, prefix: string): ReactNode[] {
     }
     cursor = start + token.length;
   }
-  if (cursor < value.length) nodes.push(value.slice(cursor));
+  if (cursor < value.length) nodes.push(cleanTags(value.slice(cursor)));
   return nodes;
 }
 
