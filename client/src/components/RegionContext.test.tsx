@@ -28,6 +28,8 @@ describe("RegionProvider", () => {
     render(<RegionProvider><RegionProbe /></RegionProvider>);
     expect(screen.getByText("Loading")).toBeInTheDocument();
     expect(await screen.findByText("All regions")).toBeInTheDocument();
-    await waitFor(() => expect(window.localStorage.getItem("jai.region")).toBe(""));
+    // The saved region is only unreachable right now — keep it stored so it's restored once the
+    // region recovers, rather than erasing the user's choice permanently.
+    await waitFor(() => expect(window.localStorage.getItem("jai.region")).toBe("eu"));
   });
 });

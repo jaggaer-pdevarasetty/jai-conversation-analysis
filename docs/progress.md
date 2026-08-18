@@ -27,7 +27,7 @@ server** (ADR-0006). Real chat-DB / LangSmith / Gemini wiring is gated on creden
 ## Ticket update (2026-08-11)
 J1-93353 was expanded into a full PRD (FR-1..4 + NFRs + AC-1..11). New/changed
 requirements now captured in `03-prd.md` / `06-nfr-slos.md` / `05-architecture.md`:
-scheduled cadence (every 4h, eligible after 5-min inactivity), **de-identification +
+manual analysis trigger (eligible after 5-min inactivity; ADR-0019), **de-identification +
 conversation-ID-only attribution** (ADR-0007), pooled RBAC, retry + visible unanalysed
 count (ADR-0008), telemetry-missing-not-zero, human override (audited), ≥85% accuracy,
 non-English handling. Working on branch **`feature/J1-93353-conversation-analysis`**
@@ -214,8 +214,9 @@ non-English handling. Working on branch **`feature/J1-93353-conversation-analysi
 ## Done — execution increment 17 (feedback tenant/date filters + Markdown tables)
 - Added server-backed feedback filters for tenant name, Last 7 days, Last 30 days, and custom
   activity-date ranges; updated the OpenAPI contract and responsive filter layout.
-- Extended the safe Markdown renderer with scrollable pipe tables while continuing to strip raw HTML;
-  serialized suggestion arrays now display as formatted bullet lists.
+- Extended the safe Markdown renderer with scrollable pipe tables; raw HTML is rendered as safe
+  escaped text (React text nodes — never executed, and no longer regex-stripped so content is not
+  lost); serialized suggestion arrays now display as formatted bullet lists.
 - Verified the reported conversation live: University of Utah, Last 7 days, and Aug 13 custom-date
   filters all return it, and the feedback list/detail routes return 200 after service restarts.
 - Green: **client 25 jest + typecheck + lint + production build; server 82 pytest, 3 skipped;
@@ -236,7 +237,7 @@ non-English handling. Working on branch **`feature/J1-93353-conversation-analysi
 ## Next
 1. Grow the eval gold set to 100–200 real labelled conversations (≥85% gate).
 2. Add server-side search/pagination and trend endpoints once review volume requires them.
-3. Scheduler wiring (every 4h) with rate-limit-aware batch.
+3. ~~Scheduler wiring (every 4h)~~ — replaced by a manual analysis trigger (ADR-0019).
 
 ## Blockers / needs
 - **Credentials:** LangSmith read key; chat DB read-only connection details; Gemini access.

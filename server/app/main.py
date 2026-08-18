@@ -71,8 +71,10 @@ def _eligible_by_region(region: str | None = None) -> dict[str, list[str]]:
 
 def _sweep(region: str | None = None) -> None:
     """Enqueue every eligible, not-yet-analysed conversation (deduped by the queue). Limited to
-    `region` when given, else all configured regions."""
-    ids = [cid for ids in _eligible_by_region(region).values() for cid in ids]
+    `region` when given, else all configured regions. Pre-filters with a single analysed_ids()
+    query so we don't fire one is_analysed() round-trip per eligible id on every trigger."""
+    analysed = store.analysed_ids()
+    ids = [cid for ids in _eligible_by_region(region).values() for cid in ids if cid not in analysed]
     analysis_queue.enqueue(ids)
 
 
@@ -447,8 +449,10 @@ def feedback_conversations(
             value = item.get("last_message_at") or item.get("analyzed_at")
             if not value:
                 return None
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            return parsed.date()
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+            except (ValueError, TypeError):
+                return None  # legacy/odd timestamp → treat as undated (don't 500)
 
         items = [
             item for item in items

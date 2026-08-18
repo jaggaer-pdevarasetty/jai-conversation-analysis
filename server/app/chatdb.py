@@ -220,6 +220,13 @@ def _load_platform_region(
     messages_by_thread: dict[str, list[Message]] = defaultdict(list)
     for row in messages:
         role = row["role"] if row["role"] in {"system", "user", "assistant", "live_agent"} else "assistant"
+        # Platform schema stores a single `tokens` total (not split) + `latency_ms`. Map to the
+        # closest Message fields so telemetry isn't lost: assistant token total -> output_tokens,
+        # user token total -> input_tokens, latency -> ttft_ms. (NOTE: platform feedback is not
+        # available in thread_messages, so Feedback stays empty here.)
+        tokens = row["tokens"]
+        latency = row["latency_ms"]
+        is_assistant = role in {"assistant", "live_agent"}
         messages_by_thread[str(row["thread_id"])].append(
             Message(
                 id=str(row["id"]),
@@ -229,6 +236,9 @@ def _load_platform_region(
                 status="completed",
                 model=row["model"],
                 created_at=str(row["created_at"]) if row["created_at"] else "",
+                input_tokens=int(tokens) if (tokens is not None and not is_assistant) else None,
+                output_tokens=int(tokens) if (tokens is not None and is_assistant) else None,
+                ttft_ms=int(latency) if latency is not None else None,
             )
         )
     return [

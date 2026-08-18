@@ -102,6 +102,33 @@ paths:
       summary: Trigger an analysis run (scheduler / reviewer)
       responses:
         '200': { description: Run summary., content: { application/json: { schema: { $ref: '#/components/schemas/RunSummary' } } } }
+  /api/analysis/analyze/pending:
+    get:
+      tags: [analysis]
+      operationId: analyzePending
+      summary: Manual flow step 1 — fetch (do not analyse) new/unanalysed conversations
+      description: >-
+        Returns the count of eligible, not-yet-analysed conversations for the selected region
+        (or all regions), a per-region breakdown, and brief details for a sample. Does not start
+        analysis. Chat-DB source only; other sources return count 0.
+      parameters:
+        - { name: region, in: query, required: false, schema: { type: string }, description: Region label (e.g. us/eu/uk); omit for all regions }
+      responses:
+        '200': { description: Pending summary., content: { application/json: { schema: { $ref: '#/components/schemas/PendingAnalysis' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+  /api/analysis/analyze/sweep:
+    post:
+      tags: [analysis]
+      operationId: analyzeSweep
+      summary: Manual flow step 2 — start background analysis of not-yet-analysed conversations
+      description: >-
+        Enqueues eligible, not-yet-analysed conversations for the selected region (or all) and
+        returns immediately (deduped; poll GET /api/analysis/queue for progress). Chat-DB source only.
+      parameters:
+        - { name: region, in: query, required: false, schema: { type: string }, description: Region label; omit for all regions }
+      responses:
+        '202': { description: Sweep started or already running., content: { application/json: { schema: { $ref: '#/components/schemas/SweepStatus' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
 components:
   responses:
     Problem:
@@ -270,6 +297,33 @@ components:
         failed: { type: integer }
         skipped: { type: integer }
         unanalysed: { type: integer }
+    PendingAnalysis:
+      type: object
+      required: [count, ids, by_region, items]
+      properties:
+        count: { type: integer, description: Total new/unanalysed conversations in scope }
+        ids: { type: array, items: { type: string }, description: Conversation ids (capped) }
+        by_region: { type: object, additionalProperties: { type: integer }, description: Pending count per region }
+        items:
+          type: array
+          description: Brief details for a sample of pending conversations
+          items:
+            type: object
+            properties:
+              conversation_id: { type: string }
+              region: { type: [string, 'null'] }
+              tenant_name: { type: [string, 'null'] }
+              title: { type: [string, 'null'] }
+              last_message_at: { type: [string, 'null'] }
+        region: { type: [string, 'null'] }
+        source: { type: string }
+    SweepStatus:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [started, already_running] }
+        region: { type: [string, 'null'] }
+        source: { type: string }
     QueueItem:
       type: object
       required: [conversation_id, status, attempt, queued_at]

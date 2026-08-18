@@ -53,31 +53,33 @@ def _scan_labels(region: str | None) -> list[str | None]:
 
 
 def overview(store: CommonStore, region: str | None = None) -> dict:
-    # 'All regions' (region=None) sums the chat-DB numbers across every configured region;
-    # unreachable regions are skipped so one bad region can't blank the whole overview.
-    tenants_n = users_n = conversations_n = 0
+    # 'All regions' (region=None) combines every configured region; unreachable regions are
+    # skipped so one bad region can't blank the overview. Tenants/users are counted DISTINCT
+    # across regions (union of ids) so the stat cards match the merged tenant directory even if
+    # an identity spans regions; conversations are region-unique so they're summed.
+    tenant_ids: set[str] = set()
+    user_ids: set[str] = set()
+    conversations_n = 0
     for label in _scan_labels(region):
         try:
             with _connect(label) as (c, sch):
                 table = "threads" if _platform_layout(c, sch) else "conversations"
                 where = "" if table == "threads" else " where is_deleted = false"
-                row = c.execute(
-                    text(
-                        f'select count(distinct tenant_id) tenants, count(distinct user_id) users, '
-                        f'count(*) conversations from "{sch}".{table}{where}'
-                    )
-                ).mappings().first()
+                for r in c.execute(text(f'select distinct tenant_id, user_id from "{sch}".{table}{where}')).all():
+                    if r[0] is not None:
+                        tenant_ids.add(str(r[0]))
+                    if r[1] is not None:
+                        user_ids.add(str(r[1]))
+                conversations_n += int(
+                    c.execute(text(f'select count(*) from "{sch}".{table}{where}')).scalar_one()
+                )
         except Exception:  # noqa: BLE001 - region unreachable → skip, don't fail the overview
             continue
-        if row:
-            tenants_n += row["tenants"] or 0
-            users_n += row["users"] or 0
-            conversations_n += row["conversations"] or 0
     counts = store.count_by_category(region=region)
     return {
         "region": region,
-        "tenants": tenants_n,
-        "users": users_n,
+        "tenants": len(tenant_ids),
+        "users": len(user_ids),
         "conversations": conversations_n,
         "analysed": sum(counts.values()),
         "unanalysed": store.unanalysed_count(),
@@ -249,40 +251,49 @@ def user_conversations(
     store: CommonStore, tenant_id: str, user_id: str, limit: int = 25, offset: int = 0,
     region: str | None = None,
 ) -> tuple[list[dict], int]:
-    with _connect(region) as (c, sch):
-        if _platform_layout(c, sch):
-            params = {"tid": tenant_id, "uid": user_id, "limit": limit, "offset": offset}
-            total = int(c.execute(
-                text(f'select count(*) from "{sch}".threads where tenant_id = :tid and user_id = :uid'),
-                params,
-            ).scalar_one())
-            rows = c.execute(
-                text(
-                    f'select thread.id, thread.title, thread.status, thread.updated_at last_message_at, '
-                    f'(select count(*) from "{sch}".thread_messages msg where msg.thread_id = thread.id) message_count '
-                    f'from "{sch}".threads thread where tenant_id = :tid and user_id = :uid '
-                    f'order by updated_at desc limit :limit offset :offset'
-                ),
-                params,
-            ).mappings().all()
-        else:
-            params = {"tid": int(tenant_id), "uid": int(user_id), "limit": limit, "offset": offset}
-            total = int(c.execute(
-                text(
-                    f'select count(*) from "{sch}".conversations '
-                    f'where is_deleted = false and tenant_id = :tid and user_id = :uid'
-                ),
-                params,
-            ).scalar_one())
-            rows = c.execute(
-                text(
-                    f'select id, title, status, last_message_at, message_count '
-                    f'from "{sch}".conversations '
-                    f'where is_deleted = false and tenant_id = :tid and user_id = :uid '
-                    f'order by last_message_at desc nulls last limit :limit offset :offset'
-                ),
-                params,
-            ).mappings().all()
+    # A tenant/user lives in one region, but scan all when region is None so the drill-down
+    # works regardless of which region owns them. Skip regions that are unreachable or whose
+    # schema can't match this id (e.g. a non-numeric id on a classic schema).
+    rows: list = []
+    total = 0
+    for label in _scan_labels(region):
+        try:
+            with _connect(label) as (c, sch):
+                if _platform_layout(c, sch):
+                    params = {"tid": tenant_id, "uid": user_id, "limit": limit, "offset": offset}
+                    total += int(c.execute(
+                        text(f'select count(*) from "{sch}".threads where tenant_id = :tid and user_id = :uid'),
+                        params,
+                    ).scalar_one())
+                    rows += c.execute(
+                        text(
+                            f'select thread.id, thread.title, thread.status, thread.updated_at last_message_at, '
+                            f'(select count(*) from "{sch}".thread_messages msg where msg.thread_id = thread.id) message_count '
+                            f'from "{sch}".threads thread where tenant_id = :tid and user_id = :uid '
+                            f'order by updated_at desc limit :limit offset :offset'
+                        ),
+                        params,
+                    ).mappings().all()
+                else:
+                    params = {"tid": int(tenant_id), "uid": int(user_id), "limit": limit, "offset": offset}
+                    total += int(c.execute(
+                        text(
+                            f'select count(*) from "{sch}".conversations '
+                            f'where is_deleted = false and tenant_id = :tid and user_id = :uid'
+                        ),
+                        params,
+                    ).scalar_one())
+                    rows += c.execute(
+                        text(
+                            f'select id, title, status, last_message_at, message_count '
+                            f'from "{sch}".conversations '
+                            f'where is_deleted = false and tenant_id = :tid and user_id = :uid '
+                            f'order by last_message_at desc nulls last limit :limit offset :offset'
+                        ),
+                        params,
+                    ).mappings().all()
+        except Exception:  # noqa: BLE001 - region unreachable / id not valid here → skip
+            continue
     out = []
     for r in rows:
         cid = str(r["id"])

@@ -29,14 +29,21 @@ export function RegionProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
     const saved = typeof window !== "undefined" ? window.localStorage.getItem(STORAGE_KEY) : null;
     const apply = (items: RegionInfo[]) => {
       if (cancelled) return;
       setRegions(items);
-      // Keep a saved region only if it is still reachable; else default to all.
-      const next = saved && items.some((r) => r.label === saved && r.reachable !== false) ? saved : "";
-      setRegionState(next);
-      if (typeof window !== "undefined") window.localStorage.setItem(STORAGE_KEY, next);
+      const known = !!saved && items.some((r) => r.label === saved);
+      const usable = !!saved && items.some((r) => r.label === saved && r.reachable !== false);
+      // Use the saved region only if it is reachable now; otherwise fall back to all for THIS
+      // session. Don't erase a saved region that merely became unreachable (e.g. during a
+      // backend restart) — keep it so it's restored once the region recovers. Only forget it
+      // if it no longer exists at all.
+      setRegionState(usable ? saved! : "");
+      if (typeof window !== "undefined" && saved && !known) {
+        window.localStorage.removeItem(STORAGE_KEY);
+      }
       setLoading(false);
     };
     const load = (attempt: number) => {
@@ -47,7 +54,7 @@ export function RegionProvider({ children }: { children: ReactNode }) {
           // The backend may be (re)starting — retry with backoff instead of leaving the
           // region dropdown permanently empty until a manual page reload.
           if (attempt < 5) {
-            window.setTimeout(() => load(attempt + 1), Math.min(1000 * (attempt + 1), 5000));
+            retryTimer = setTimeout(() => load(attempt + 1), Math.min(1000 * (attempt + 1), 5000));
           } else {
             setRegions([]);
             setLoading(false);
@@ -57,6 +64,7 @@ export function RegionProvider({ children }: { children: ReactNode }) {
     load(0);
     return () => {
       cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
     };
   }, []);
 
