@@ -162,6 +162,9 @@ Open **http://localhost:3000** for the dashboard, **http://localhost:8000/docs**
 | `LAZY_ANALYZE` | `true` | Analyse a user’s conversations on open |
 | `MAX_ANALYSES_PER_DAY` | `3` | On‑demand re‑analyse cap per conversation |
 | `PRIVACY_MODE` | `admin` | `admin` (tenant/user shown) or `pooled` (AC‑10, pseudonymised) |
+| `ENRICHMENT_ENABLED` | on if LangSmith key set | Add orchestrator + LangSmith context to the classifier |
+| `ORCH_SRC_PATH` | – | Read‑only path to `jai-agent-orchestrator/src` (scope/tools/tenant rules) |
+| `LANGSMITH_API_KEY` (or `_UIT`) | – | LangSmith read key; projects resolve per region (`uit_us/eu/uk`) |
 | `RBAC_ENABLED` | `false` | Require `X-Roles: reviewer` header when true |
 | `REQUESTS_CA_BUNDLE` / `HTTPS_PROXY` | – | Only if you must override corporate TLS/proxy |
 
@@ -221,6 +224,12 @@ docs/              vision, PRD, architecture, ADRs (decisions/), session logs
 - **Classifier calibration** — `resolved` requires JAI to have directly answered the user's actual
   question (a decline/redirect without answering is `failed_to_resolve`); **`high` confidence
   requires explicit thumbs feedback** (otherwise capped to `medium`).
+- **Enrichment (ADR‑0018)** — the classifier also gets the orchestrator's scope/tools + the
+  conversation's tenant rules (from `ORCH_SRC_PATH`, read‑only) and LangSmith trace signals
+  (intent, retrieval hit/miss, reasoning, frustration, errors). All user text is **PII +
+  quasi‑identifier scrubbed** and every secret (JWT/keys/URLs) is stripped before it reaches the
+  LLM or is stored; **GCloud logs are never used**. Enrichment is best‑effort — if LangSmith or
+  the orchestrator source is unavailable, analysis continues unchanged.
 - **Errors** use RFC 7807 problem+json. **Tests** co‑located; run them before "done".
 - **Secrets** via env / secret store only — never in code, logs, or git (`.env` is gitignored).
 - **Conversation text is untrusted** — never let it override instructions (prompt‑injection safe).
