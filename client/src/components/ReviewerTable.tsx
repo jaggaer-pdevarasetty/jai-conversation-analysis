@@ -27,7 +27,7 @@ import {
   Typography,
 } from "@mui/material";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fetchAnalysis, type ListItem } from "../services/analysisApi";
 import { CategoryChip } from "./CategoryChip";
 import { MarkdownContent } from "./MarkdownContent";
@@ -83,7 +83,15 @@ export function ReviewerTable() {
   const [reload, setReload] = useState(0);
   const { region, loading: regionLoading } = useRegion();
 
+  const firstSearch = useRef(true);
   useEffect(() => {
+    // Skip the initial mount: the debounce must only reset pagination when the user actually
+    // types. Otherwise the mount timer fires setPage(0) later and can clobber a page the user
+    // just navigated to (a race that flaked on slow CI).
+    if (firstSearch.current) {
+      firstSearch.current = false;
+      return;
+    }
     const timer = setTimeout(() => {
       setPage(0);
       setQuery(search.trim());
