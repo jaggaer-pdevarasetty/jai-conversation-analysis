@@ -140,10 +140,11 @@ export default function OverviewPage() {
     (data.counts.failed_to_resolve ?? 0) +
     (data.counts.negative_feedback ?? 0) +
     (data.counts.out_of_scope ?? 0);
-  const coverageItems = data.items.filter(
+  const coverageItems = overview?.telemetry_complete ?? data.items.filter(
     (item) => item.metrics.ttft_ms !== null && item.metrics.input_tokens !== null && item.metrics.output_tokens !== null,
   ).length;
-  const telemetryCoverage = data.items.length ? Math.round((coverageItems / data.items.length) * 100) : 0;
+  const telemetryTotal = overview?.telemetry_total ?? data.items.length;
+  const telemetryCoverage = telemetryTotal ? Math.round((coverageItems / telemetryTotal) * 100) : 0;
   const analysisCoverage = sourceConversations ? Math.round((analysed / sourceConversations) * 100) : 0;
   const lowConfidence = data.items.filter((item) => item.confidence === "low").length;
   const overrides = data.items.filter((item) => item.overridden).length;
@@ -211,7 +212,7 @@ export default function OverviewPage() {
         <StatCard label="Source conversations" value={sourceConversations.toLocaleString()} helper="Available read-only conversation records" icon={<ForumOutlinedIcon />} tone="#65758B" />
         <StatCard label="Analysed" value={analysed.toLocaleString()} helper={`${analysisCoverage}% of source conversations`} icon={<FactCheckOutlinedIcon />} tone="#16815D" />
         <StatCard label="Needs attention" value={attention.toLocaleString()} helper="Failures, negative feedback, and capability gaps" icon={<ErrorOutlineRoundedIcon />} tone="#C43D4B" />
-        <StatCard label="Telemetry complete" value={`${telemetryCoverage}%`} helper="Latency and token data in the loaded analysis set" icon={<SpeedRoundedIcon />} tone="#7A55B8" />
+        <StatCard label="Telemetry complete" value={`${telemetryCoverage}%`} helper={`${coverageItems.toLocaleString()} of ${telemetryTotal.toLocaleString()} analysed conversations`} icon={<SpeedRoundedIcon />} tone="#7A55B8" />
       </Box>
 
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "minmax(0, 1.65fr) minmax(300px, .75fr)" }, gap: 2.5, alignItems: "start" }}>
@@ -275,7 +276,7 @@ export default function OverviewPage() {
               <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}><Typography variant="body2" color="text.secondary">Positive outcomes</Typography><Chip size="small" label={positive} /></Box>
               <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}><Typography variant="body2" color="text.secondary">Low confidence</Typography><Chip size="small" label={lowConfidence} /></Box>
               <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}><Typography variant="body2" color="text.secondary">Human overrides</Typography><Chip size="small" label={overrides} /></Box>
-              <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}><Typography variant="body2" color="text.secondary">Missing telemetry</Typography><Chip size="small" label={data.items.length - coverageItems} /></Box>
+              <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}><Typography variant="body2" color="text.secondary">Missing telemetry</Typography><Chip size="small" label={telemetryTotal - coverageItems} /></Box>
             </Stack>
           </Paper>
         </Stack>

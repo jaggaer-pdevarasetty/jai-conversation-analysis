@@ -16,15 +16,17 @@ from collections import Counter
 from .store import CommonStore
 
 
-def operational_stats(store: CommonStore, queue=None, latest_run=None, region: str | None = None) -> dict:
-    records = store.list(region=region)
+def operational_stats(store: CommonStore, queue=None, latest_run=None, region: str | None = None,
+                      env: str = "uit") -> dict:
+    records = store.list(region=region, env=env)
     tokens_in = sum((r.metrics.input_tokens or 0) for r in records)
     tokens_out = sum((r.metrics.output_tokens or 0) for r in records)
     stats: dict = {
         "region": region,
+        "environment": env,
         "analysed": len(records),
-        "unanalysed": store.unanalysed_count(),
-        "counts": store.count_by_category(region=region),
+        "unanalysed": store.unanalysed_count(env),
+        "counts": store.count_by_category(region=region, env=env),
         "analyzers": dict(Counter(r.analyzer_version for r in records)),  # vertex vs rules
         "by_region": dict(Counter((r.region or "unknown") for r in records)),
         "overrides": sum(1 for r in records if r.override is not None),
@@ -42,11 +44,12 @@ def operational_stats(store: CommonStore, queue=None, latest_run=None, region: s
     return stats
 
 
-def product_report(store: CommonStore, top: int = 10, region: str | None = None) -> dict:
-    records = store.list(region=region)
+def product_report(store: CommonStore, top: int = 10, region: str | None = None,
+                   env: str = "uit") -> dict:
+    records = store.list(region=region, env=env)
     total = len(records)
     denom = total or 1
-    counts = store.count_by_category(region=region)
+    counts = store.count_by_category(region=region, env=env)
     distribution = {c: {"count": n, "pct": round(100 * n / denom, 1)} for c, n in counts.items()}
 
     # High-frequency issues: the most common recommended next steps on unresolved chats.
@@ -94,5 +97,5 @@ def product_report(store: CommonStore, top: int = 10, region: str | None = None)
         "new_use_cases": new_use_cases,
         "by_region": by_region,
         "top_tenants_by_issues": top_tenants,
-        "unanalysed": store.unanalysed_count(),
+        "unanalysed": store.unanalysed_count(env),
     }

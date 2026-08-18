@@ -51,41 +51,43 @@ from .queue import AnalysisQueue  # noqa: E402
 
 analysis_queue = AnalysisQueue(store, make_batch_analyzer(), workers=settings.queue_workers)
 
-def _eligible_by_region(region: str | None = None) -> dict[str, list[str]]:
-    """{region_label: eligible ids}. One region if given, else all configured. A region that
-    errors (e.g. permission denied) is skipped so it can't block the others."""
+def _eligible_by_region(region: str | None = None, env: str = "uit") -> dict[str, list[str]]:
+    """{region_label: eligible ids} for an environment. One region if given, else all configured.
+    PROD is restricted to conversations with user feedback (too many to bulk-analyse). A region
+    that errors (e.g. permission denied) is skipped so it can't block the others."""
     from .chatdb import _eligible_in_region, configured_regions, resolve_region
 
-    regions = [resolve_region(region)] if region else configured_regions()
+    feedback_only = env == "prod"
+    regions = [resolve_region(region, env)] if region else configured_regions(env)
     out: dict[str, list[str]] = {}
     for r in regions:
         if r is None:
             continue
         try:
-            out[r.label] = _eligible_in_region(r, None, None)
+            out[r.label] = _eligible_in_region(r, None, None, feedback_only=feedback_only)
         except Exception as exc:  # noqa: BLE001 - one bad region must not stop the rest
             print(f"[warn] eligibility skipped region '{r.label}': {type(exc).__name__}", flush=True)
             out[r.label] = []
     return out
 
 
-def _sweep(region: str | None = None) -> None:
-    """Enqueue every eligible, not-yet-analysed conversation (deduped by the queue). Limited to
-    `region` when given, else all configured regions. Pre-filters with a single analysed_ids()
-    query so we don't fire one is_analysed() round-trip per eligible id on every trigger."""
-    analysed = store.analysed_ids()
-    ids = [cid for ids in _eligible_by_region(region).values() for cid in ids if cid not in analysed]
-    analysis_queue.enqueue(ids)
+def _sweep(region: str | None = None, env: str = "uit") -> None:
+    """Enqueue every eligible, not-yet-analysed conversation for an environment (deduped by the
+    queue). Pre-filters with a single analysed_ids() query so we don't fire one is_analysed()
+    round-trip per eligible id on every trigger."""
+    analysed = store.analysed_ids(env)
+    ids = [cid for ids in _eligible_by_region(region, env).values() for cid in ids if cid not in analysed]
+    analysis_queue.enqueue(ids, env)
 
 
 _sweep_lock = threading.Lock()
 _sweep_running = False
 
 
-def trigger_sweep(region: str | None = None) -> bool:
+def trigger_sweep(region: str | None = None, env: str = "uit") -> bool:
     """Manual trigger: run a check + analyse sweep in the background (deduped; only
-    not-yet-analysed conversations are processed) for `region` (or all). Returns False if a
-    sweep is already running, so repeated button clicks don't pile up."""
+    not-yet-analysed conversations are processed) for `region` (or all) in `env`. Returns False
+    if a sweep is already running, so repeated button clicks don't pile up."""
     global _sweep_running
     with _sweep_lock:
         if _sweep_running:
@@ -95,7 +97,7 @@ def trigger_sweep(region: str | None = None) -> bool:
     def _run() -> None:
         global _sweep_running
         try:
-            _sweep(region)
+            _sweep(region, env)
         except Exception as exc:  # noqa: BLE001 - chat DB may be unreachable; never crash
             print(f"[warn] manual sweep failed: {type(exc).__name__}", flush=True)
         finally:
@@ -106,16 +108,17 @@ def trigger_sweep(region: str | None = None) -> bool:
     return True
 
 
-region_health: list[dict] = []  # per-region connectivity, checked once at startup
+region_health: list[dict] = []  # per (env, region) connectivity, checked once at startup
 if settings.source == "chatdb":
-    # Test EVERY configured region before serving: connect + verify the required tables.
+    # Test EVERY configured region of EVERY environment before serving: connect + verify tables.
     # We log and continue (a bad/permission-denied region must not crash the app or leak data).
     from .chatdb import check_regions
 
-    region_health = check_regions()
+    for _env in settings.environments():
+        region_health += check_regions(_env)
     for h in region_health:
         state = "OK " + str(h["counts"]) if h["ok"] else f"UNREACHABLE ({h['error']})"
-        print(f"[startup] region '{h['label']}' {h['host']}/{h['db']}.{h['schema']}: {state}", flush=True)
+        print(f"[startup] {h['env']}/{h['label']} {h['host']}/{h['db']}.{h['schema']}: {state}", flush=True)
     if not any(h["ok"] for h in region_health):
         print("[startup][warn] NO region is readable — dashboards will be empty until fixed.", flush=True)
 
@@ -137,13 +140,20 @@ def require_reviewer(x_roles: str | None = Header(default=None)) -> None:
         raise HTTPException(status_code=403, detail="Reviewer role required")
 
 
-def _bad_region(region: str | None):
-    """Reject an unknown region label (strict — prevents accidental cross-region leakage)."""
+def _env(env: str | None) -> str:
+    """Normalise the environment label to a known one (uit/prod); unknown → uit."""
+    from .config import valid_env
+
+    return valid_env(env)
+
+
+def _bad_region(region: str | None, env: str = "uit"):
+    """Reject an unknown region label for the environment (strict — no cross-region leakage)."""
     if region is None:
         return None
     from .chatdb import region_labels
 
-    if region not in region_labels():
+    if region not in region_labels(env):
         return problem_response(400, "Invalid region", f"Unknown region: {region}")
     return None
 
@@ -183,12 +193,32 @@ def health() -> dict[str, str]:
 api = APIRouter(prefix="/api/analysis", dependencies=[Depends(require_reviewer)])
 
 
+@api.get("/environments")
+def list_environments():
+    """Environments available for the UI toggle (e.g. uit, prod), with per-region reachability."""
+    envs = settings.environments() or ["uit"]
+    return {
+        "items": [
+            {
+                "env": e,
+                "regions": [
+                    {"label": h["label"], "reachable": h["ok"], "counts": h["counts"], "error": h["error"]}
+                    for h in region_health if h.get("env") == e
+                ],
+            }
+            for e in envs
+        ],
+        "default": "uit",
+    }
+
+
 @api.get("/regions")
-def list_regions():
-    """Regions available for the UI dropdown, with startup reachability + table counts."""
+def list_regions(env: str | None = Query(default=None)):
+    """Regions available for the UI dropdown (for the selected env), with reachability + counts."""
     from .chatdb import configured_regions
 
-    health = {h["label"]: h for h in region_health}
+    e = _env(env)
+    health = {h["label"]: h for h in region_health if h.get("env") == e}
     return {
         "items": [
             {
@@ -197,7 +227,7 @@ def list_regions():
                 "counts": health.get(r.label, {}).get("counts", {}),
                 "error": health.get(r.label, {}).get("error"),
             }
-            for r in configured_regions()
+            for r in configured_regions(e)
         ]
     }
 
@@ -206,6 +236,7 @@ def list_regions():
 def list_conversations(
     category: str | None = Query(default=None),
     region: str | None = Query(default=None),
+    env: str | None = Query(default=None),
     query: str | None = Query(default=None, max_length=200),
     confidence: str | None = Query(default=None),
     review_state: str | None = Query(default=None),
@@ -213,9 +244,10 @@ def list_conversations(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ):
+    env = _env(env)
     if category is not None and category not in CATEGORIES:
         return problem_response(400, "Invalid category", f"Unknown category: {category}")
-    if (bad := _bad_region(region)) is not None:
+    if (bad := _bad_region(region, env)) is not None:
         return bad
     if confidence is not None and confidence not in {"high", "medium", "low"}:
         return problem_response(400, "Invalid confidence", f"Unknown confidence: {confidence}")
@@ -224,8 +256,8 @@ def list_conversations(
     if sort not in {"newest", "oldest", "attention", "confidence", "slowest", "tokens"}:
         return problem_response(400, "Invalid sort", f"Unknown sort: {sort}")
 
-    records = store.list(category=category, region=region)  # type: ignore[arg-type]
-    conversations = store.get_conversations([record.conversation_id for record in records])
+    records = store.list(category=category, region=region, env=env)  # type: ignore[arg-type]
+    conversations = store.get_conversations([record.conversation_id for record in records], env)
     items = [_list_item(record, conversations.get(record.conversation_id)) for record in records]
     text_query = (query or "").strip().lower()
     if text_query:
@@ -268,25 +300,26 @@ def list_conversations(
     total = len(items)
     return {
         "items": items[offset : offset + limit],
-        "counts": store.count_by_category(region=region),
+        "counts": store.count_by_category(region=region, env=env),
         "total": total,
-        "unanalysed": store.unanalysed_count(),
+        "unanalysed": store.unanalysed_count(env),
         "region": region,
+        "environment": env,
         "limit": limit,
         "offset": offset,
     }
 
 
-def _conversation_detail(conversation_id: str) -> dict | None:
-    record = store.get_analysis(conversation_id)
-    conv = store.get_conversation(conversation_id)
+def _conversation_detail(conversation_id: str, env: str = "uit") -> dict | None:
+    record = store.get_analysis(conversation_id, env)
+    conv = store.get_conversation(conversation_id, env)
     if record is None or conv is None:
         return None
     source = None
     try:
         from . import dashboard
 
-        source = dashboard.conversation_meta([conversation_id]).get(conversation_id)
+        source = dashboard.conversation_meta([conversation_id], env=env).get(conversation_id)
     except Exception:  # noqa: BLE001 - chat DB optional; detail still works de-identified
         source = None
     return {
@@ -324,8 +357,8 @@ def _conversation_detail(conversation_id: str) -> dict | None:
 
 
 @api.get("/conversations/{conversation_id}")
-def get_conversation(conversation_id: str):
-    payload = _conversation_detail(conversation_id)
+def get_conversation(conversation_id: str, env: str | None = Query(default=None)):
+    payload = _conversation_detail(conversation_id, _env(env))
     if payload is None:
         return problem_response(404, "Not found", f"No analysis for conversation {conversation_id}")
     return payload
@@ -338,6 +371,7 @@ _NEGATIVE_CATEGORIES = {"negative_feedback", "failed_to_resolve"}
 def feedback_conversations(
     scope: str = Query(default="thumbs", pattern="^(thumbs|outcomes|all)$"),
     region: str | None = Query(default=None),
+    env: str | None = Query(default=None),
     rating: str | None = Query(default=None, pattern="^(positive|negative)$"),
     category: str | None = Query(default=None),
     query: str | None = Query(default=None, max_length=200),
@@ -356,15 +390,16 @@ def feedback_conversations(
         negative_feedback) even without a thumb — the large 'went badly' set.
     scope=all: union of both.
     """
-    if (bad := _bad_region(region)) is not None:
+    env = _env(env)
+    if (bad := _bad_region(region, env)) is not None:
         return bad
     if category is not None and category not in CATEGORIES:
         return problem_response(400, "Invalid category", f"Unknown category: {category}")
     if date_from and date_to and date_from > date_to:
         return problem_response(400, "Invalid date range", "date_from must be on or before date_to")
     items = []
-    records = store.list(region=region)
-    conversations = store.get_conversations([record.conversation_id for record in records])
+    records = store.list(region=region, env=env)
+    conversations = store.get_conversations([record.conversation_id for record in records], env)
     for record in records:
         conv = conversations.get(record.conversation_id)
         has_thumbs = conv is not None and conv.feedback.rating is not None
@@ -414,7 +449,7 @@ def feedback_conversations(
         try:
             from . import dashboard
 
-            meta = dashboard.conversation_meta([item["conversation_id"] for item in rows], region=region)
+            meta = dashboard.conversation_meta([item["conversation_id"] for item in rows], region=region, env=env)
         except Exception:  # noqa: BLE001 - chat DB optional
             meta = {}
         for item in rows:
@@ -499,6 +534,7 @@ def feedback_export(
     format: str = Query(default="csv", pattern="^(csv|json|pdf)$"),
     scope: str = Query(default="all", pattern="^(thumbs|outcomes|all)$"),
     region: str | None = Query(default=None),
+    env: str | None = Query(default=None),
     rating: str | None = Query(default=None, pattern="^(positive|negative)$"),
     category: str | None = Query(default=None),
     query: str | None = Query(default=None, max_length=200),
@@ -512,7 +548,8 @@ def feedback_export(
     pagination) with full detail — category, confidence, feedback + user remark, 3-part root
     cause, suggestions + recommended action, cost & responsiveness, and the full de-identified
     transcript — as CSV, JSON, or PDF. Honours the same filters as GET /feedback."""
-    if (bad := _bad_region(region)) is not None:
+    env = _env(env)
+    if (bad := _bad_region(region, env)) is not None:
         return bad
     if category is not None and category not in CATEGORIES:
         return problem_response(400, "Invalid category", f"Unknown category: {category}")
@@ -523,7 +560,7 @@ def feedback_export(
     rows = export.collect_rows(
         store, scope=scope, region=region, rating=rating, category=category,
         query=query, tenant=tenant, date_range=date_range,
-        date_from=date_from, date_to=date_to, sort=sort,
+        date_from=date_from, date_to=date_to, sort=sort, env=env,
     )
     data, media = export.render(rows, format)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
@@ -537,21 +574,23 @@ def feedback_export(
 
 
 @api.post("/conversations/{conversation_id}/analyze")
-def analyze_conversation(conversation_id: str):
-    """On-demand (re)analyse ONE conversation now. Capped at MAX_ANALYSES_PER_DAY per convo."""
+def analyze_conversation(conversation_id: str, env: str | None = Query(default=None)):
+    """On-demand (re)analyse ONE conversation now (any environment — this is how PROD
+    conversations get analysed). Capped at MAX_ANALYSES_PER_DAY per convo per env."""
     import uuid
     from datetime import datetime, timezone
 
     from .chatdb import load_one_from_chatdb
     from .deidentify import deidentify
 
-    if store.analyses_today(conversation_id) >= settings.max_analyses_per_day:
+    env = _env(env)
+    if store.analyses_today(conversation_id, env=env) >= settings.max_analyses_per_day:
         return problem_response(
             429, "Daily analyse limit reached",
             f"This conversation was already analysed {settings.max_analyses_per_day} times today.",
         )
     try:
-        conv = load_one_from_chatdb(conversation_id)
+        conv = load_one_from_chatdb(conversation_id, env=env)
     except Exception as exc:  # noqa: BLE001
         return problem_response(503, "Chat DB unavailable", type(exc).__name__)
     if conv is None:
@@ -562,11 +601,11 @@ def analyze_conversation(conversation_id: str):
     now = datetime.now(timezone.utc)
     records = make_batch_analyzer()([conv], f"ondemand_{uuid.uuid4().hex[:8]}", now.isoformat())
     if not records:
-        store.mark_failed(conversation_id)
+        store.mark_failed(conversation_id, env)
         return problem_response(503, "Analysis failed", "model unavailable; please retry")
-    store.record_analysis(conversation_id, now.isoformat())
+    store.record_analysis(conversation_id, now.isoformat(), env)
     store.upsert(records[0], deidentify(conv))
-    return _conversation_detail(conversation_id)
+    return _conversation_detail(conversation_id, env)
 
 
 class OverrideBody(BaseModel):
@@ -575,10 +614,10 @@ class OverrideBody(BaseModel):
 
 
 @api.post("/conversations/{conversation_id}/override")
-def override_category(conversation_id: str, body: OverrideBody):
+def override_category(conversation_id: str, body: OverrideBody, env: str | None = Query(default=None)):
     if body.category not in CATEGORIES:
         return problem_response(400, "Invalid category", f"Unknown category: {body.category}")
-    record = store.set_override(conversation_id, body.category, body.actor)  # type: ignore[arg-type]
+    record = store.set_override(conversation_id, body.category, body.actor, _env(env))  # type: ignore[arg-type]
     if record is None:
         return problem_response(404, "Not found", f"No analysis for conversation {conversation_id}")
     return {
@@ -597,13 +636,14 @@ def latest_run_summary():
 
 # ── Admin dashboard: tenant → user → conversation drill-down (authorised view) ──
 @api.get("/dashboard/overview")
-def dashboard_overview(region: str | None = Query(default=None)):
+def dashboard_overview(region: str | None = Query(default=None), env: str | None = Query(default=None)):
     from . import dashboard
 
-    if (bad := _bad_region(region)) is not None:
+    env = _env(env)
+    if (bad := _bad_region(region, env)) is not None:
         return bad
     try:
-        return dashboard.overview(store, region=region)
+        return dashboard.overview(store, region=region, env=env)
     except Exception as exc:  # noqa: BLE001
         return problem_response(503, "Chat DB unavailable", type(exc).__name__)
 
@@ -619,29 +659,31 @@ def _pooled_block():
 
 
 @api.get("/dashboard/tenants")
-def dashboard_tenants(region: str | None = Query(default=None)):
+def dashboard_tenants(region: str | None = Query(default=None), env: str | None = Query(default=None)):
     from . import dashboard
 
+    env = _env(env)
     if (blocked := _pooled_block()) is not None:
         return blocked
-    if (bad := _bad_region(region)) is not None:
+    if (bad := _bad_region(region, env)) is not None:
         return bad
     try:
-        return {"items": dashboard.tenants(region=region), "region": region}
+        return {"items": dashboard.tenants(region=region, env=env), "region": region, "environment": env}
     except Exception as exc:  # noqa: BLE001
         return problem_response(503, "Chat DB unavailable", type(exc).__name__)
 
 
 @api.get("/dashboard/tenants/{tenant_id}/users")
-def dashboard_users(tenant_id: str, region: str | None = Query(default=None)):
+def dashboard_users(tenant_id: str, region: str | None = Query(default=None), env: str | None = Query(default=None)):
     from . import dashboard
 
+    env = _env(env)
     if (blocked := _pooled_block()) is not None:
         return blocked
-    if (bad := _bad_region(region)) is not None:
+    if (bad := _bad_region(region, env)) is not None:
         return bad
     try:
-        return {"items": dashboard.users(tenant_id, region=region), "region": region}
+        return {"items": dashboard.users(tenant_id, region=region, env=env), "region": region, "environment": env}
     except Exception as exc:  # noqa: BLE001
         return problem_response(503, "Chat DB unavailable", type(exc).__name__)
 
@@ -651,24 +693,27 @@ def dashboard_user_conversations(
     tenant_id: str,
     user_id: str,
     region: str | None = Query(default=None),
+    env: str | None = Query(default=None),
     limit: int = Query(default=25, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ):
     from . import dashboard
 
+    env = _env(env)
     if (blocked := _pooled_block()) is not None:
         return blocked
-    if (bad := _bad_region(region)) is not None:
+    if (bad := _bad_region(region, env)) is not None:
         return bad
     try:
-        items, total = dashboard.user_conversations(store, tenant_id, user_id, limit, offset, region=region)
+        items, total = dashboard.user_conversations(store, tenant_id, user_id, limit, offset, region=region, env=env)
     except Exception as exc:  # noqa: BLE001
         return problem_response(503, "Chat DB unavailable", type(exc).__name__)
 
-    # Lazy analyse: enqueue un-analysed ones (deduped, no re-run) and mark them 'analysing'.
-    if settings.lazy_analyze:
+    # Lazy analyse: UIT only. PROD is opt-in (per-conversation button / feedback-only sweep), so
+    # browsing PROD never triggers analysis of its huge conversation volume.
+    if settings.lazy_analyze and env == "uit":
         pending = [it["conversation_id"] for it in items if it["status"] == "pending"]
-        accepted = set(analysis_queue.enqueue(pending)) if pending else set()
+        accepted = set(analysis_queue.enqueue(pending, env)) if pending else set()
         for it in items:
             if it["conversation_id"] in accepted:
                 it["status"] = "analysing"
@@ -685,23 +730,25 @@ def queue_stats(
 
 
 @api.get("/analyze/pending")
-def analyze_pending(region: str | None = Query(default=None)):
+def analyze_pending(region: str | None = Query(default=None), env: str | None = Query(default=None)):
     """Step 1 of the manual flow: FETCH (don't analyse) the eligible, not-yet-analysed
     conversations for the selected region (or all regions), returning the total, a per-region
-    breakdown, and brief details for a sample. The UI then shows a 'Start analysis' button."""
+    breakdown, and brief details for a sample. The UI then shows a 'Start analysis' button.
+    In PROD this is bounded to conversations that have user feedback."""
+    env = _env(env)
     if settings.source != "chatdb":
-        return {"count": 0, "ids": [], "by_region": {}, "items": [], "region": region, "source": settings.source}
-    if (bad := _bad_region(region)) is not None:
+        return {"count": 0, "ids": [], "by_region": {}, "items": [], "region": region, "environment": env, "source": settings.source}
+    if (bad := _bad_region(region, env)) is not None:
         return bad
     from . import dashboard
 
-    analysed = store.analysed_ids()
-    by_ids = {lbl: [i for i in ids if i not in analysed] for lbl, ids in _eligible_by_region(region).items()}
+    analysed = store.analysed_ids(env)
+    by_ids = {lbl: [i for i in ids if i not in analysed] for lbl, ids in _eligible_by_region(region, env).items()}
     by_region = {lbl: len(ids) for lbl, ids in by_ids.items()}
     all_ids = [i for ids in by_ids.values() for i in ids]
     # Privacy-aware details for the scrollable list (conversation_meta applies pooled-mode
     # pseudonyms when configured).
-    meta = dashboard.conversation_meta(all_ids, region=region) if all_ids else {}
+    meta = dashboard.conversation_meta(all_ids, region=region, env=env) if all_ids else {}
     items = [
         {
             "conversation_id": cid,
@@ -718,41 +765,45 @@ def analyze_pending(region: str | None = Query(default=None)):
         "by_region": by_region,
         "items": items,
         "region": region,
+        "environment": env,
         "source": settings.source,
     }
 
 
 @api.post("/analyze/sweep", status_code=202)
-def analyze_sweep(region: str | None = Query(default=None)):
+def analyze_sweep(region: str | None = Query(default=None), env: str | None = Query(default=None)):
     """Step 2 of the manual flow: analyse every not-yet-analysed conversation for the selected
-    region (or all). Deduped; runs in the background — poll GET /queue for progress. Returns
-    'already_running' if a sweep is still in flight."""
+    region (or all) in the environment. In PROD only feedback conversations are swept. Deduped;
+    runs in the background — poll GET /queue for progress."""
+    env = _env(env)
     if settings.source != "chatdb":
         return problem_response(400, "Not available", "Manual analysis applies to the chat DB source only.")
-    if (bad := _bad_region(region)) is not None:
+    if (bad := _bad_region(region, env)) is not None:
         return bad
-    started = trigger_sweep(region)
-    return {"status": "started" if started else "already_running", "region": region, "source": settings.source}
+    started = trigger_sweep(region, env)
+    return {"status": "started" if started else "already_running", "region": region, "environment": env, "source": settings.source}
 
 
 @api.get("/stats")
-def operational_stats(region: str | None = Query(default=None)):
+def operational_stats(region: str | None = Query(default=None), env: str | None = Query(default=None)):
     """Operational metrics: throughput, queue health, LLM vs rules, override + token totals."""
     from . import reporting
 
-    if (bad := _bad_region(region)) is not None:
+    env = _env(env)
+    if (bad := _bad_region(region, env)) is not None:
         return bad
-    return reporting.operational_stats(store, analysis_queue, latest_run, region=region)
+    return reporting.operational_stats(store, analysis_queue, latest_run, region=region, env=env)
 
 
 @api.get("/report")
-def product_report(region: str | None = Query(default=None)):
+def product_report(region: str | None = Query(default=None), env: str | None = Query(default=None)):
     """Business report (J1-93353): category mix, high-frequency issues, new use-cases."""
     from . import reporting
 
-    if (bad := _bad_region(region)) is not None:
+    env = _env(env)
+    if (bad := _bad_region(region, env)) is not None:
         return bad
-    return reporting.product_report(store, region=region)
+    return reporting.product_report(store, region=region, env=env)
 
 
 @api.post("/runs")

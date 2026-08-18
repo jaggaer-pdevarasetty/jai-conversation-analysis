@@ -101,42 +101,52 @@ class Settings:
     def vertex_configured(self) -> bool:
         return bool(self.vertex_project and self.vertex_location)
 
-    def langsmith_project_for(self, region: str) -> str:
-        """LangSmith project name for a region. Default convention: uit_<region>.
-        Override with REGION_<X>_LANGSMITH_PROJECT, or LANGSMITH_PROJECT for single-project."""
-        env = os.getenv(f"REGION_{region.upper()}_LANGSMITH_PROJECT", "")
-        if env:
-            return env
-        if self.langsmith_project:
-            return self.langsmith_project
-        return f"uit_{region.lower()}" if region else ""
+    def langsmith_project_for(self, region: str, env: str = "uit") -> str:
+        """LangSmith project name for a region in an environment. Default convention:
+        <env>_<region> (e.g. uit_us / prod_us). Override with [PROD_]REGION_<X>_LANGSMITH_PROJECT
+        or [PROD_]LANGSMITH_PROJECT for a single project."""
+        p = _env_prefix(env)
+        override = os.getenv(f"{p}REGION_{region.upper()}_LANGSMITH_PROJECT", "")
+        if override:
+            return override
+        single = os.getenv(f"{p}LANGSMITH_PROJECT", "") or (self.langsmith_project if env == "uit" else "")
+        if single:
+            return single
+        return f"{env}_{region.lower()}" if region else ""
 
-    def regions(self) -> "list[RegionConfig]":
-        """Configured regional chat DBs.
+    def langsmith_api_key_for(self, env: str = "uit") -> str:
+        """LangSmith key for an environment (PROD_LANGSMITH_API_KEY for prod; else the default)."""
+        if env == "uit":
+            return self.langsmith_api_key
+        return os.getenv(f"{_env_prefix(env)}LANGSMITH_API_KEY", "") or self.langsmith_api_key
 
-        Multi-region: set REGIONS=us,eu,uk and, per label, REGION_US_CHAT_DB_URL /
-        REGION_US_CHAT_DB_NAME / REGION_US_CHAT_DB_SCHEMA (name/schema fall back to the
-        global CHAT_DB_NAME/CHAT_DB_SCHEMA). Single-region (legacy): just CHAT_DB_URL, labelled
-        by REGION_LABEL (default "uk").
+    def regions(self, env: str = "uit") -> "list[RegionConfig]":
+        """Configured regional chat DBs for an environment (READ-ONLY).
+
+        Per environment set [PROD_]REGIONS=us,eu,uk and, per label,
+        [PROD_]REGION_US_CHAT_DB_URL / _NAME / _SCHEMA (name/schema fall back to the global
+        CHAT_DB_NAME/CHAT_DB_SCHEMA). UIT also supports a legacy single region: just CHAT_DB_URL,
+        labelled by REGION_LABEL (default "uk"). 'prod' uses the PROD_ prefix.
         """
-        labels = [x.strip() for x in os.getenv("REGIONS", "").split(",") if x.strip()]
+        p = _env_prefix(env)
+        labels = [x.strip() for x in os.getenv(f"{p}REGIONS", "").split(",") if x.strip()]
         if labels:
             out: list[RegionConfig] = []
             for label in labels:
                 u = label.upper()
-                url = os.getenv(f"REGION_{u}_CHAT_DB_URL", "")
+                url = os.getenv(f"{p}REGION_{u}_CHAT_DB_URL", "")
                 if not url:
                     continue
                 out.append(
                     RegionConfig(
                         label=label,
                         url=url,
-                        db_name=os.getenv(f"REGION_{u}_CHAT_DB_NAME", self.chat_db_name),
-                        schema=os.getenv(f"REGION_{u}_CHAT_DB_SCHEMA", self.chat_db_schema),
+                        db_name=os.getenv(f"{p}REGION_{u}_CHAT_DB_NAME", self.chat_db_name),
+                        schema=os.getenv(f"{p}REGION_{u}_CHAT_DB_SCHEMA", self.chat_db_schema),
                     )
                 )
             return out
-        if self.chat_db_url:  # legacy single region
+        if env == "uit" and self.chat_db_url:  # legacy single region (UIT only)
             return [
                 RegionConfig(
                     label=os.getenv("REGION_LABEL", "uk"),
@@ -146,6 +156,24 @@ class Settings:
                 )
             ]
         return []
+
+    def environments(self) -> "list[str]":
+        """Environments that have at least one chat DB configured (UIT first, then PROD)."""
+        return [e for e in ENVIRONMENTS if self.regions(e)]
+
+
+ENVIRONMENTS = ("uit", "prod")
+DEFAULT_ENV = "uit"
+
+
+def _env_prefix(env: str) -> str:
+    """'' for uit (back-compat env vars), 'PROD_' for prod, etc."""
+    return "" if env == DEFAULT_ENV else f"{env.upper()}_"
+
+
+def valid_env(env: str | None) -> str:
+    """Normalise an environment label to a known one (defaults to UIT)."""
+    return env if env in ENVIRONMENTS else DEFAULT_ENV
 
 
 settings = Settings()

@@ -82,6 +82,7 @@ def analyze(conv: Conversation, run_id: str, now: str | None = None) -> Analysis
         analyzer_version=ANALYZER_VERSION,
         analyzed_at=now or datetime.now(timezone.utc).isoformat(),
         region=conv.region,
+        environment=conv.environment,
         tenant_id=conv.tenant_id,
         enrichment=conv.enrichment,
     )

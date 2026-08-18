@@ -12,6 +12,35 @@ servers:
 tags:
   - name: analysis
 paths:
+  /api/analysis/environments:
+    get:
+      tags: [analysis]
+      operationId: listEnvironments
+      summary: Environments available for the UI toggle (uit/prod) with per-region reachability
+      responses:
+        '200':
+          description: Environments.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        env: { type: string }
+                        regions:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              label: { type: string }
+                              reachable: { type: [boolean, 'null'] }
+                              counts: { type: object, additionalProperties: { type: integer } }
+                              error: { type: [string, 'null'] }
+                  default: { type: string }
   /api/analysis/conversations:
     get:
       tags: [analysis]
@@ -37,6 +66,7 @@ paths:
       parameters:
         - { name: scope, in: query, required: false, schema: { type: string, enum: [thumbs, outcomes, all], default: thumbs } }
         - { name: region, in: query, required: false, schema: { type: string } }
+        - { name: env, in: query, required: false, schema: { type: string, enum: [uit, prod] }, description: Environment (default uit) }
         - { name: rating, in: query, required: false, schema: { type: string, enum: [positive, negative] } }
         - { name: category, in: query, required: false, schema: { $ref: '#/components/schemas/Category' } }
         - { name: query, in: query, required: false, schema: { type: string }, description: Search feedback, source metadata, recommendation, or conversation ID. }
@@ -116,6 +146,7 @@ paths:
         - { name: format, in: query, required: false, schema: { type: string, enum: [csv, json, pdf], default: csv } }
         - { name: scope, in: query, required: false, schema: { type: string, enum: [thumbs, outcomes, all], default: all } }
         - { name: region, in: query, required: false, schema: { type: string } }
+        - { name: env, in: query, required: false, schema: { type: string, enum: [uit, prod] }, description: Environment (default uit) }
         - { name: rating, in: query, required: false, schema: { type: string, enum: [positive, negative] } }
         - { name: category, in: query, required: false, schema: { type: string } }
         - { name: query, in: query, required: false, schema: { type: string, maxLength: 200 }, description: Free-text search (same fields as /feedback) }
@@ -143,6 +174,7 @@ paths:
         analysis. Chat-DB source only; other sources return count 0.
       parameters:
         - { name: region, in: query, required: false, schema: { type: string }, description: Region label (e.g. us/eu/uk); omit for all regions }
+        - { name: env, in: query, required: false, schema: { type: string, enum: [uit, prod] }, description: Environment (default uit) }
       responses:
         '200': { description: Pending summary., content: { application/json: { schema: { $ref: '#/components/schemas/PendingAnalysis' } } } }
         '400': { $ref: '#/components/responses/Problem' }
@@ -156,6 +188,7 @@ paths:
         returns immediately (deduped; poll GET /api/analysis/queue for progress). Chat-DB source only.
       parameters:
         - { name: region, in: query, required: false, schema: { type: string }, description: Region label; omit for all regions }
+        - { name: env, in: query, required: false, schema: { type: string, enum: [uit, prod] }, description: Environment (default uit) }
       responses:
         '202': { description: Sweep started or already running., content: { application/json: { schema: { $ref: '#/components/schemas/SweepStatus' } } } }
         '400': { $ref: '#/components/responses/Problem' }

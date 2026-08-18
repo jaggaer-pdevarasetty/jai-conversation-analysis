@@ -25,21 +25,22 @@ from .pii import redact
 _PROJECT_IDS: dict[str, str] = {}
 
 
-def _headers() -> dict:
-    return {"x-api-key": settings.langsmith_api_key} if settings.langsmith_api_key else {}
+def _headers(env: str = "uit") -> dict:
+    key = settings.langsmith_api_key_for(env)
+    return {"x-api-key": key} if key else {}
 
 
-def _project_id(name: str) -> str | None:
+def _project_id(name: str, env: str = "uit") -> str | None:
     """Resolve a LangSmith project name → id. None if not found / no key. Only truthy results
     are memoised, so one network/auth hiccup does not permanently skip enrichment."""
-    if not name or not settings.langsmith_api_key:
+    if not name or not settings.langsmith_api_key_for(env):
         return None
     if name in _PROJECT_IDS:
         return _PROJECT_IDS[name]
     hc = make_client()
     try:
         # Filter server-side by name so accounts with >100 projects still resolve.
-        r = hc.get(f"{settings.langsmith_base_url}/sessions", headers=_headers(),
+        r = hc.get(f"{settings.langsmith_base_url}/sessions", headers=_headers(env),
                    params={"name": name, "limit": 100})
         if r.status_code != 200:
             return None
@@ -56,11 +57,11 @@ def _project_id(name: str) -> str | None:
     return None
 
 
-def fetch_enrichment(conversation_id: str, region: str) -> Enrichment | None:
+def fetch_enrichment(conversation_id: str, region: str, env: str = "uit") -> Enrichment | None:
     """Fetch + build safe enrichment for one conversation, or None. Never raises."""
-    if not settings.enrichment_enabled or not settings.langsmith_api_key or not conversation_id:
+    if not settings.enrichment_enabled or not settings.langsmith_api_key_for(env) or not conversation_id:
         return None
-    project_id = _project_id(settings.langsmith_project_for(region))
+    project_id = _project_id(settings.langsmith_project_for(region, env), env)
     if not project_id:
         return None
     # LangSmith filter DSL: match metadata via has(metadata, '{"k": "v"}') — the JSON literal is
@@ -74,7 +75,7 @@ def fetch_enrichment(conversation_id: str, region: str) -> Enrichment | None:
     }
     hc = make_client()
     try:
-        r = hc.post(f"{settings.langsmith_base_url}/runs/query", headers=_headers(), json=body)
+        r = hc.post(f"{settings.langsmith_base_url}/runs/query", headers=_headers(env), json=body)
         if r.status_code != 200:
             return None
         runs = r.json().get("runs", [])

@@ -46,13 +46,13 @@ def test_list_bulk_loads_conversations(monkeypatch):
     monkeypatch.setattr(
         main_module.store,
         "get_conversations",
-        lambda ids: calls.append(ids) or {cid: conversations[cid] for cid in ids},
+        lambda ids, env="uit": calls.append(ids) or {cid: conversations[cid] for cid in ids},
         raising=False,
     )
     monkeypatch.setattr(
         main_module.store,
         "get_conversation",
-        lambda _conversation_id: (_ for _ in ()).throw(AssertionError("single-row lookup used")),
+        lambda _conversation_id, env="uit": (_ for _ in ()).throw(AssertionError("single-row lookup used")),
     )
 
     assert client.get("/api/analysis/conversations").status_code == 200
@@ -173,7 +173,7 @@ def test_queue_summary_exposes_live_items():
 def test_user_conversations_endpoint_paginates(monkeypatch):
     monkeypatch.setattr(
         "app.dashboard.user_conversations",
-        lambda store, tenant_id, user_id, limit, offset, region=None: ([], 42),
+        lambda store, tenant_id, user_id, limit, offset, region=None, env="uit": ([], 42),
     )
     body = client.get(
         "/api/analysis/dashboard/tenants/t1/users/u1/conversations",

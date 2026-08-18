@@ -211,6 +211,18 @@ non-English handling. Working on branch **`feature/J1-93353-conversation-analysi
 - Audited every frontend route and restarted the dev server only after a clean production build.
 - Green: **client 24 jest + typecheck + lint + production build**; all eight frontend routes return 200.
 
+## Done — execution increment 19 (environment toggle: UIT / PROD)
+- Added an **environment** axis (uit/prod) orthogonal to region (ADR-0020). A UIT/PROD toggle in
+  the app bar (remember-last) switches the whole app; every request carries `?env=`.
+- **Strict isolation**: results store now keyed by `(conversation_id, environment)` with an
+  idempotent startup migration (existing rows → uit); every read/write/count filters by env.
+- **PROD posture**: browse everything; **no auto-analysis**; per-conversation **Analyze** button;
+  bulk sweep restricted to **feedback conversations only** (PROD volume). All UIT guards carry over.
+- Config via `PROD_*` vars (currently pointed at UIT as a dummy for end-to-end testing until real
+  PROD credentials exist). Verified live: browse/filters/regions per env, feedback-only pending
+  (PROD 358 vs UIT 17), analyze one PROD conversation → stored PROD-only (UIT untouched).
+- ADR-0020 + openapi (`/environments`, `env` params) + tests (store isolation, config).
+
 ## Done — execution increment 18 (feedback export + empty-conversation guard)
 - Added a **Download** button on the Feedback page (CSV / PDF / JSON) → `GET /api/analysis/feedback/export`.
   Each export includes, per feedback conversation: category, confidence, feedback type + user remark,

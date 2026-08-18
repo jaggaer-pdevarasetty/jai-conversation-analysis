@@ -35,24 +35,24 @@ def _dashboard_engine(url: str, db_name: str):
 
 
 @contextmanager
-def _connect(region: str | None):
-    """A connection + validated schema for one region."""
-    r = resolve_region(region)
+def _connect(region: str | None, env: str = "uit"):
+    """A connection + validated schema for one region in an environment."""
+    r = resolve_region(region, env)
     if r is None:
         raise RuntimeError("no chat DB region configured (set REGIONS/REGION_*_CHAT_DB_URL)")
     with _dashboard_engine(r.url, r.db_name).connect() as c:
         yield c, safe_schema(r.schema)
 
 
-def _scan_labels(region: str | None) -> list[str | None]:
-    """Regions to query: just the one requested, or ALL configured regions when region is None
-    ('All regions'). Falls back to [None] (single legacy region) if none are configured."""
+def _scan_labels(region: str | None, env: str = "uit") -> list[str | None]:
+    """Regions to query: just the one requested, or ALL configured regions of the env when
+    region is None ('All regions'). Falls back to [None] (legacy single region) if none set."""
     if region:
         return [region]
-    return list(region_labels()) or [None]
+    return list(region_labels(env)) or [None]
 
 
-def overview(store: CommonStore, region: str | None = None) -> dict:
+def overview(store: CommonStore, region: str | None = None, env: str = "uit") -> dict:
     # 'All regions' (region=None) combines every configured region; unreachable regions are
     # skipped so one bad region can't blank the overview. Tenants/users are counted DISTINCT
     # across regions (union of ids) so the stat cards match the merged tenant directory even if
@@ -60,9 +60,9 @@ def overview(store: CommonStore, region: str | None = None) -> dict:
     tenant_ids: set[str] = set()
     user_ids: set[str] = set()
     conversations_n = 0
-    for label in _scan_labels(region):
+    for label in _scan_labels(region, env):
         try:
-            with _connect(label) as (c, sch):
+            with _connect(label, env) as (c, sch):
                 table = "threads" if _platform_layout(c, sch) else "conversations"
                 where = "" if table == "threads" else " where is_deleted = false"
                 for r in c.execute(text(f'select distinct tenant_id, user_id from "{sch}".{table}{where}')).all():
@@ -75,25 +75,34 @@ def overview(store: CommonStore, region: str | None = None) -> dict:
                 )
         except Exception:  # noqa: BLE001 - region unreachable → skip, don't fail the overview
             continue
-    counts = store.count_by_category(region=region)
+    records = store.list(region=region, env=env)
+    counts = store.count_by_category(region=region, env=env)
+    telemetry_complete = sum(
+        record.metrics.ttft_ms is not None
+        and record.metrics.input_tokens is not None
+        and record.metrics.output_tokens is not None
+        for record in records
+    )
     return {
         "region": region,
         "tenants": len(tenant_ids),
         "users": len(user_ids),
         "conversations": conversations_n,
         "analysed": sum(counts.values()),
-        "unanalysed": store.unanalysed_count(),
+        "unanalysed": store.unanalysed_count(env=env),
         "counts": counts,
+        "telemetry_complete": telemetry_complete,
+        "telemetry_total": len(records),
     }
 
 
-def tenants(region: str | None = None) -> list[dict]:
+def tenants(region: str | None = None, env: str = "uit") -> list[dict]:
     # Merge tenants across all regions when region is None (same tenant in two regions is
     # combined). Unreachable regions are skipped.
     merged: dict[str, dict] = {}
-    for label in _scan_labels(region):
+    for label in _scan_labels(region, env):
         try:
-            with _connect(label) as (c, sch):
+            with _connect(label, env) as (c, sch):
                 if _platform_layout(c, sch):
                     rows = c.execute(
                         text(
@@ -136,14 +145,14 @@ def tenants(region: str | None = None) -> list[dict]:
     return out
 
 
-def users(tenant_id: str, region: str | None = None) -> list[dict]:
+def users(tenant_id: str, region: str | None = None, env: str = "uit") -> list[dict]:
     # A tenant lives in one region in practice, but scan all when region is None so the drill-down
     # works regardless of which region the tenant is in. Regions that are unreachable — or whose
     # schema can't match this tenant_id (e.g. non-numeric id on a standard schema) — are skipped.
     merged: dict[str, dict] = {}
-    for label in _scan_labels(region):
+    for label in _scan_labels(region, env):
         try:
-            with _connect(label) as (c, sch):
+            with _connect(label, env) as (c, sch):
                 if _platform_layout(c, sch):
                     rows = c.execute(
                         text(
@@ -189,7 +198,7 @@ def users(tenant_id: str, region: str | None = None) -> list[dict]:
     return out
 
 
-def conversation_meta(ids: list[str], region: str | None = None) -> dict[str, dict]:
+def conversation_meta(ids: list[str], region: str | None = None, env: str = "uit") -> dict[str, dict]:
     """Source metadata (tenant/user/title/timestamps) for conversation ids, across regions.
     One query per region (no N+1). Unreachable regions are skipped (resilient)."""
     if not ids:
@@ -218,11 +227,11 @@ def conversation_meta(ids: list[str], region: str | None = None) -> dict[str, di
             f'where conv.id::text in :ids'
         ).bindparams(bindparam("ids", expanding=True))
 
-    labels = [region] if region else (region_labels() or [None])
+    labels = [region] if region else (region_labels(env) or [None])
     out: dict[str, dict] = {}
     for label in labels:
         try:
-            with _connect(label) as (c, sch):
+            with _connect(label, env) as (c, sch):
                 rows = c.execute(_sql(sch, _platform_layout(c, sch)), {"ids": ids}).mappings().all()
         except Exception:  # noqa: BLE001 - region unreachable (e.g. permission denied) → skip
             continue
@@ -249,16 +258,16 @@ def conversation_meta(ids: list[str], region: str | None = None) -> dict[str, di
 
 def user_conversations(
     store: CommonStore, tenant_id: str, user_id: str, limit: int = 25, offset: int = 0,
-    region: str | None = None,
+    region: str | None = None, env: str = "uit",
 ) -> tuple[list[dict], int]:
     # A tenant/user lives in one region, but scan all when region is None so the drill-down
     # works regardless of which region owns them. Skip regions that are unreachable or whose
     # schema can't match this id (e.g. a non-numeric id on a classic schema).
     rows: list = []
     total = 0
-    for label in _scan_labels(region):
+    for label in _scan_labels(region, env):
         try:
-            with _connect(label) as (c, sch):
+            with _connect(label, env) as (c, sch):
                 if _platform_layout(c, sch):
                     params = {"tid": tenant_id, "uid": user_id, "limit": limit, "offset": offset}
                     total += int(c.execute(
@@ -297,10 +306,10 @@ def user_conversations(
     out = []
     for r in rows:
         cid = str(r["id"])
-        rec = store.get_analysis(cid)
+        rec = store.get_analysis(cid, env)
         if rec is not None:
             status = "analysed"
-        elif store.is_analyzing(cid):
+        elif store.is_analyzing(cid, env):
             status = "analysing"
         else:
             status = "pending"

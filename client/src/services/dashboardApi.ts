@@ -1,4 +1,5 @@
 import { API_BASE } from "../config";
+import { withEnv } from "./env";
 
 export interface Overview {
   region?: string | null;
@@ -8,6 +9,8 @@ export interface Overview {
   analysed: number;
   unanalysed: number;
   counts: Record<string, number>;
+  telemetry_complete: number;
+  telemetry_total: number;
 }
 export interface RegionInfo {
   label: string;
@@ -46,13 +49,20 @@ export interface UserConversationPage {
 }
 
 async function getJson<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`);
+  const res = await fetch(withEnv(new URL(`${API_BASE}${path}`)).toString());
   if (!res.ok) throw new Error(`API ${res.status}`);
   return (await res.json()) as T;
 }
 
 /** `?region=us` when a region is selected, else empty (all regions). */
 const rq = (region?: string) => (region ? `?region=${encodeURIComponent(region)}` : "");
+
+export interface EnvInfo {
+  env: string;
+  regions: { label: string; reachable: boolean | null; counts: Record<string, number>; error: string | null }[];
+}
+export const fetchEnvironments = () =>
+  getJson<{ items: EnvInfo[]; default: string }>("/api/analysis/environments");
 
 export const fetchRegions = () =>
   getJson<{ items: RegionInfo[] }>("/api/analysis/regions").then((d) => d.items);

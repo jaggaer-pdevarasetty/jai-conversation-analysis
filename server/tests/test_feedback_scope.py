@@ -50,7 +50,7 @@ def test_feedback_filters_by_tenant_and_activity_date(monkeypatch):
     today = datetime.now(timezone.utc).date().isoformat()
     monkeypatch.setattr(
         "app.dashboard.conversation_meta",
-        lambda conversation_ids, region=None: {
+        lambda conversation_ids, region=None, env="uit": {
             cid: {
                 "tenant_name": "Acme" if index == 0 else "Other",
                 "last_message_at": f"{today}T12:00:00+00:00",

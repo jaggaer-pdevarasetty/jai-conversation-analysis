@@ -10,6 +10,8 @@ loops**:
 - **Bounded:** a fixed `maxsize`; when full, `enqueue` applies backpressure (skips the rest)
   rather than exploding memory.
 - **Concurrency:** a small fixed worker pool pulls items and analyses them in batches.
+- **Environment-aware:** every item is an (environment, conversation_id) pair so UIT and PROD
+  are loaded from the right chat DB and stored with strict isolation (ADR-0020).
 
 At multi-instance scale, swap the internal `queue.Queue` for Redis / Cloud Tasks / PubSub —
 the `enqueue()` contract and worker loop stay the same.
@@ -20,9 +22,12 @@ from __future__ import annotations
 import queue
 import threading
 import time
+from collections import defaultdict
 from datetime import datetime, timezone
 
 from .config import settings
+
+Item = tuple[str, str]  # (environment, conversation_id)
 
 
 class AnalysisQueue:
@@ -38,14 +43,14 @@ class AnalysisQueue:
     ) -> None:
         self._store = store
         self._analyze = analyze_batch  # (convs, run_id, now_iso) -> [AnalysisRecord]
-        self._q: queue.Queue[str] = queue.Queue(maxsize=maxsize)
+        self._q: queue.Queue[Item] = queue.Queue(maxsize=maxsize)
         self._lock = threading.Lock()
-        self._queued: set[str] = set()  # in queue OR in-flight (dedup)
-        self._in_flight: set[str] = set()
-        self._retrying: set[str] = set()
-        self._queued_at: dict[str, str] = {}
-        self._attempts: dict[str, int] = {}
-        self._dead: set[str] = set()
+        self._queued: set[Item] = set()  # in queue OR in-flight (dedup)
+        self._in_flight: set[Item] = set()
+        self._retrying: set[Item] = set()
+        self._queued_at: dict[Item, str] = {}
+        self._attempts: dict[Item, int] = {}
+        self._dead: set[Item] = set()
         self._batch_size = batch_size or settings.batch_size
         self._max_attempts = max_attempts
         self._workers = [threading.Thread(target=self._work, name=f"analyzer-{i}", daemon=True) for i in range(workers)]
@@ -57,24 +62,25 @@ class AnalysisQueue:
             for w in self._workers:
                 w.start()
 
-    def enqueue(self, conversation_ids: list[str]) -> list[str]:
-        """Add ids to the queue, skipping already-analysed / already-queued / dead ones."""
+    def enqueue(self, conversation_ids: list[str], env: str = "uit") -> list[str]:
+        """Add ids to the queue for an environment, skipping already-analysed / queued / dead."""
         accepted: list[str] = []
         with self._lock:
             for cid in conversation_ids:
-                if cid in self._queued or cid in self._dead:
+                item = (env, cid)
+                if item in self._queued or item in self._dead:
                     continue
-                if self._store.is_analysed(cid):
+                if self._store.is_analysed(cid, env):
                     continue
                 try:
-                    self._q.put_nowait(cid)
+                    self._q.put_nowait(item)
                 except queue.Full:
                     break  # backpressure: stop accepting when full
-                self._queued.add(cid)
-                self._queued_at[cid] = datetime.now(timezone.utc).isoformat()
+                self._queued.add(item)
+                self._queued_at[item] = datetime.now(timezone.utc).isoformat()
                 accepted.append(cid)
         if accepted:
-            self._store.mark_analyzing(accepted)
+            self._store.mark_analyzing(accepted, env)
         return accepted
 
     def stats(self, limit: int = 100, offset: int = 0) -> dict:
@@ -82,11 +88,12 @@ class AnalysisQueue:
             items = [
                 {
                     "conversation_id": cid,
-                    "status": "retrying" if cid in self._retrying else "analysing" if cid in self._in_flight else "queued",
-                    "attempt": self._attempts.get(cid, 0) + 1,
-                    "queued_at": self._queued_at[cid],
+                    "environment": env,
+                    "status": "retrying" if (env, cid) in self._retrying else "analysing" if (env, cid) in self._in_flight else "queued",
+                    "attempt": self._attempts.get((env, cid), 0) + 1,
+                    "queued_at": self._queued_at[(env, cid)],
                 }
-                for cid in sorted(self._queued, key=lambda item: self._queued_at[item])
+                for (env, cid) in sorted(self._queued, key=lambda it: self._queued_at[it])
             ]
             return {
                 "queued": self._q.qsize(),
@@ -117,7 +124,12 @@ class AnalysisQueue:
             with self._lock:
                 self._in_flight.update(batch)
             try:
-                self._process(batch)
+                # group by environment so each is loaded from its own chat DB
+                by_env: dict[str, list[str]] = defaultdict(list)
+                for env, cid in batch:
+                    by_env[env].append(cid)
+                for env, cids in by_env.items():
+                    self._process(cids, env)
             except Exception as exc:  # noqa: BLE001 - a worker must never die
                 print(f"[warn] queue worker error: {type(exc).__name__}", flush=True)
                 self._retry_or_dead(batch)
@@ -125,15 +137,15 @@ class AnalysisQueue:
                 for _ in batch:
                     self._q.task_done()
 
-    def _process(self, ids: list[str]) -> None:
+    def _process(self, ids: list[str], env: str) -> None:
         from .chatdb import load_from_chatdb
         from .deidentify import deidentify
 
         now = datetime.now(timezone.utc).isoformat()
         try:
-            convs = load_from_chatdb(ids=ids)
+            convs = load_from_chatdb(ids=ids, env=env)
         except Exception:  # transient (e.g. chat DB blip) → retry the whole batch
-            self._retry_or_dead(ids)
+            self._retry_or_dead([(env, cid) for cid in ids])
             return
 
         found = {c.id: c for c in convs}
@@ -146,56 +158,58 @@ class AnalysisQueue:
             records = {}
 
         for cid in ids:
-            if self._store.is_analysed(cid):  # analysed meanwhile (e.g. on-demand) → no re-run
-                self._finish(cid)
+            if self._store.is_analysed(cid, env):  # analysed meanwhile → no re-run
+                self._finish(env, cid)
                 continue
             conv = found.get(cid)
             if conv is None:  # id no longer exists in the source → don't retry forever
-                self._finish(cid)
+                self._finish(env, cid)
                 continue
             if not conv.messages:  # no transcript → skip (don't analyse, don't retry forever)
-                self._finish(cid)
+                self._finish(env, cid)
                 continue
             rec = records.get(cid)
             if rec is not None:
                 self._store.upsert(rec, deidentify(conv))
-                self._store.record_analysis(cid, now)
-                self._finish(cid)
+                self._store.record_analysis(cid, now, env)
+                self._finish(env, cid)
             else:
-                self._retry_or_dead([cid])
+                self._retry_or_dead([(env, cid)])
 
-    def _finish(self, cid: str) -> None:
+    def _finish(self, env: str, cid: str) -> None:
+        item = (env, cid)
         with self._lock:
-            self._queued.discard(cid)
-            self._in_flight.discard(cid)
-            self._retrying.discard(cid)
-            self._queued_at.pop(cid, None)
-            self._attempts.pop(cid, None)
-        self._store.clear_analyzing(cid)
+            self._queued.discard(item)
+            self._in_flight.discard(item)
+            self._retrying.discard(item)
+            self._queued_at.pop(item, None)
+            self._attempts.pop(item, None)
+        self._store.clear_analyzing(cid, env)
 
-    def _retry_or_dead(self, ids: list[str]) -> None:
-        for cid in ids:
+    def _retry_or_dead(self, items: list[Item]) -> None:
+        for item in items:
+            env, cid = item
             with self._lock:
-                n = self._attempts.get(cid, 0) + 1
-                self._attempts[cid] = n
-                self._in_flight.discard(cid)
+                n = self._attempts.get(item, 0) + 1
+                self._attempts[item] = n
+                self._in_flight.discard(item)
                 give_up = n >= self._max_attempts
                 if not give_up:
-                    self._retrying.add(cid)
+                    self._retrying.add(item)
             if give_up:
                 with self._lock:
-                    self._queued.discard(cid)
-                    self._retrying.discard(cid)
-                    self._queued_at.pop(cid, None)
-                    self._dead.add(cid)
-                    self._attempts.pop(cid, None)
-                self._store.mark_failed(cid)  # visible as unanalysed; never retried again
-                self._store.clear_analyzing(cid)
+                    self._queued.discard(item)
+                    self._retrying.discard(item)
+                    self._queued_at.pop(item, None)
+                    self._dead.add(item)
+                    self._attempts.pop(item, None)
+                self._store.mark_failed(cid, env)  # visible as unanalysed; never retried again
+                self._store.clear_analyzing(cid, env)
             else:
                 time.sleep(min(2 ** n, 10))  # backoff, then requeue
                 try:
-                    self._q.put_nowait(cid)
+                    self._q.put_nowait(item)
                     with self._lock:
-                        self._retrying.discard(cid)
+                        self._retrying.discard(item)
                 except queue.Full:
-                    self._finish(cid)  # can't requeue → release (a later sweep can re-add)
+                    self._finish(env, cid)  # can't requeue → release (a later sweep can re-add)

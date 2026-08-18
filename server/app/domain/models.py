@@ -67,6 +67,7 @@ class Conversation:
     messages: list[Message]
     feedback: Feedback
     region: str = ""  # source region label (us/eu/uk) — carried through to the record
+    environment: str = "uit"  # source environment (uit/prod) — carried through to the record
     # Hints sourced from LangSmith (router intent / frustration) in production.
     out_of_scope_intent: bool = False
     frustrated: bool = False
@@ -153,6 +154,7 @@ class AnalysisRecord:
     analyzer_version: str
     analyzed_at: str
     region: str = ""  # which regional source this came from (us/eu/uk) — for analytics
+    environment: str = "uit"  # which environment this came from (uit/prod) — strict isolation
     tenant_id: str = ""  # kept for tenant analytics (a company, not a person)
     override: Optional[Override] = None
     deep: Optional[DeepAnalysis] = None  # populated only when the conversation has feedback
@@ -171,6 +173,7 @@ class CommonConversation:
     conversation_id: str
     messages: list[Message]
     feedback: Feedback
+    environment: str = "uit"  # env this transcript belongs to (uit/prod) — strict isolation
 
 
 @dataclass
