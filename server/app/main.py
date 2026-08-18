@@ -501,17 +501,30 @@ def feedback_export(
     region: str | None = Query(default=None),
     rating: str | None = Query(default=None, pattern="^(positive|negative)$"),
     category: str | None = Query(default=None),
+    query: str | None = Query(default=None, max_length=200),
+    tenant: str | None = Query(default=None, max_length=200),
+    date_range: str | None = Query(default=None, pattern="^(last_7_days|last_30_days)$"),
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    sort: str = Query(default="newest", pattern="^(newest|oldest|negative_first)$"),
 ):
-    """Download ALL feedback conversations in scope (no pagination) with full detail — category,
-    confidence, feedback + user remark, 3-part root cause, suggestions + recommended action, cost
-    & responsiveness metrics, and the full de-identified transcript — as CSV, JSON, or PDF."""
+    """Download the feedback conversations for the current view (all matching rows, no
+    pagination) with full detail — category, confidence, feedback + user remark, 3-part root
+    cause, suggestions + recommended action, cost & responsiveness, and the full de-identified
+    transcript — as CSV, JSON, or PDF. Honours the same filters as GET /feedback."""
     if (bad := _bad_region(region)) is not None:
         return bad
     if category is not None and category not in CATEGORIES:
         return problem_response(400, "Invalid category", f"Unknown category: {category}")
+    if date_from and date_to and date_from > date_to:
+        return problem_response(400, "Invalid date range", "date_from must be on or before date_to")
     from . import export
 
-    rows = export.collect_rows(store, scope=scope, region=region, rating=rating, category=category)
+    rows = export.collect_rows(
+        store, scope=scope, region=region, rating=rating, category=category,
+        query=query, tenant=tenant, date_range=date_range,
+        date_from=date_from, date_to=date_to, sort=sort,
+    )
     data, media = export.render(rows, format)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     ext = {"json": "json", "pdf": "pdf"}.get(format, "csv")

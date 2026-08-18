@@ -159,7 +159,19 @@ export default function FeedbackPage() {
         </Box>
         <Stack direction="row" spacing={1.5} alignItems="center">
           <Chip icon={<ChatBubbleOutlineRoundedIcon />} label="Explicit feedback only" variant="outlined" sx={{ bgcolor: "#FFFFFF" }} />
-          <DownloadFeedbackButton region={region} scope="thumbs" rating={rating} category={category} />
+          <DownloadFeedbackButton
+            region={region}
+            scope="thumbs"
+            rating={rating}
+            category={category}
+            query={query}
+            tenant={tenant}
+            date_range={dateRange}
+            date_from={dateFrom}
+            date_to={dateTo}
+            sort={sort}
+            disabled={invalidDateRange}
+          />
         </Stack>
       </Box>
 

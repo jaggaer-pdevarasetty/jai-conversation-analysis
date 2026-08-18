@@ -255,10 +255,17 @@ export interface FeedbackExportParams {
   region?: string;
   rating?: string;
   category?: string;
+  query?: string;
+  tenant?: string;
+  date_range?: string;
+  date_from?: string;
+  date_to?: string;
+  sort?: string;
 }
 
 /** Build the download URL for the feedback export (full detail: transcript + root cause +
- * recommendations + cost, all rows in scope). The server sends it as an attachment. */
+ * recommendations + cost). Passes the same filters as the feedback list so the file matches the
+ * current view. The server sends it as an attachment. */
 export function feedbackExportUrl(params: FeedbackExportParams = {}): string {
   const url = new URL(`${API_BASE}/api/analysis/feedback/export`);
   url.searchParams.set("format", params.format ?? "csv");
@@ -266,6 +273,12 @@ export function feedbackExportUrl(params: FeedbackExportParams = {}): string {
   if (params.region) url.searchParams.set("region", params.region);
   if (params.rating) url.searchParams.set("rating", params.rating);
   if (params.category) url.searchParams.set("category", params.category);
+  if (params.query) url.searchParams.set("query", params.query);
+  if (params.tenant) url.searchParams.set("tenant", params.tenant);
+  if (params.date_range) url.searchParams.set("date_range", params.date_range);
+  if (params.date_from) url.searchParams.set("date_from", params.date_from);
+  if (params.date_to) url.searchParams.set("date_to", params.date_to);
+  if (params.sort && params.sort !== "newest") url.searchParams.set("sort", params.sort);
   return url.toString();
 }
 

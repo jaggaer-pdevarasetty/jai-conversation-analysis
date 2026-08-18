@@ -11,8 +11,13 @@ from __future__ import annotations
 import csv
 import io
 import json
+from datetime import datetime, timedelta, timezone
 
 _NEGATIVE = {"failed_to_resolve", "negative_feedback"}
+_SEARCH_FIELDS = (
+    "conversation_id", "user_remark", "title", "tenant_name", "user_name",
+    "recommended_next_step", "why_it_happened",
+)
 
 # Flat columns (transcript is added separately per format).
 FIELDS = [
@@ -26,8 +31,15 @@ FIELDS = [
 
 
 def collect_rows(store, scope: str = "all", region: str | None = None,
-                 rating: str | None = None, category: str | None = None) -> list[dict]:
-    """All feedback conversations in scope (no pagination), each with full detail + transcript."""
+                 rating: str | None = None, category: str | None = None, *,
+                 query: str | None = None, tenant: str | None = None,
+                 date_range: str | None = None, date_from=None, date_to=None,
+                 sort: str = "newest") -> list[dict]:
+    """All feedback conversations in scope (no pagination), each with full detail + transcript.
+
+    Honours the SAME filters as GET /feedback (search text, tenant, activity date range, sort) so
+    a download matches exactly what the reviewer has on screen.
+    """
     records = store.list(region=region)
     convs = store.get_conversations([r.conversation_id for r in records])
     try:
@@ -91,6 +103,50 @@ def collect_rows(store, scope: str = "all", region: str | None = None,
             "run_id": rec.run_id,
             "transcript": transcript,
         })
+
+    # --- same text / tenant / date / sort filters as GET /feedback ---
+    tq = (query or "").strip().lower()
+    if tq:
+        rows = [r for r in rows if any(tq in str(r.get(f) or "").lower() for f in _SEARCH_FIELDS)]
+    tn = (tenant or "").strip().lower()
+    if tn:
+        rows = [r for r in rows if tn in str(r.get("tenant_name") or "").lower()]
+
+    range_start, range_end = date_from, date_to
+    if date_range:
+        range_end = datetime.now(timezone.utc).date()
+        range_start = range_end - timedelta(days=6 if date_range == "last_7_days" else 29)
+    if range_start or range_end:
+        def _day(r):
+            value = r.get("last_message_at") or r.get("analyzed_at")
+            if not value:
+                return None
+            try:
+                return datetime.fromisoformat(str(value).replace("Z", "+00:00")).date()
+            except (ValueError, TypeError):
+                return None
+
+        rows = [
+            r for r in rows
+            if (d := _day(r)) is not None
+            and (range_start is None or d >= range_start)
+            and (range_end is None or d <= range_end)
+        ]
+
+    if sort == "oldest":
+        rows.sort(key=lambda r: r.get("last_message_at") or r.get("analyzed_at") or "")
+    elif sort == "negative_first":
+        def _rank(r):
+            if r["feedback_type"] == "thumbs_down":
+                return 0
+            if r["category"] in _NEGATIVE:
+                return 1
+            if r["feedback_type"] == "thumbs_up":
+                return 2
+            return 3
+        rows.sort(key=_rank)
+    else:  # newest
+        rows.sort(key=lambda r: r.get("last_message_at") or r.get("analyzed_at") or "", reverse=True)
     return rows
 
 

@@ -12,9 +12,9 @@ const FORMATS: { fmt: ExportFormat; label: string; hint: string }[] = [
 ];
 
 /** Download button + format menu for the feedback export. Passes the current view's filters
- * (region/scope/rating/category) so the file matches what the reviewer is looking at, with full
- * detail for every matching conversation (not just the current page). */
-export function DownloadFeedbackButton(params: FeedbackExportParams) {
+ * (region/scope/rating/category/search/tenant/date/sort) so the file matches exactly what the
+ * reviewer is looking at, with full detail for every matching conversation (not just the page). */
+export function DownloadFeedbackButton({ disabled, ...params }: FeedbackExportParams & { disabled?: boolean }) {
   const [anchor, setAnchor] = useState<null | HTMLElement>(null);
 
   const download = (format: ExportFormat) => {
@@ -34,6 +34,7 @@ export function DownloadFeedbackButton(params: FeedbackExportParams) {
         size="small"
         startIcon={<DownloadRoundedIcon />}
         onClick={(e) => setAnchor(e.currentTarget)}
+        disabled={disabled}
         aria-haspopup="menu"
         aria-expanded={anchor ? "true" : undefined}
       >

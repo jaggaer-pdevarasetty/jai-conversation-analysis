@@ -43,3 +43,16 @@ def test_export_pdf_is_a_valid_pdf():
 def test_export_rejects_unknown_format():
     r = client.get("/api/analysis/feedback/export?format=xml")
     assert r.status_code == 422
+
+
+def test_export_applies_search_filter():
+    # a query that matches nothing must produce an empty export (filters are honoured)
+    r = client.get("/api/analysis/feedback/export?format=json&scope=all&query=zzz_no_such_text_xyz")
+    assert r.status_code == 200
+    assert json.loads(r.text) == []
+
+
+def test_export_rejects_inverted_date_range():
+    r = client.get("/api/analysis/feedback/export?format=csv&date_from=2026-02-02&date_to=2026-01-01")
+    assert r.status_code == 400
+    assert r.json()["title"] == "Invalid date range"

@@ -118,6 +118,12 @@ paths:
         - { name: region, in: query, required: false, schema: { type: string } }
         - { name: rating, in: query, required: false, schema: { type: string, enum: [positive, negative] } }
         - { name: category, in: query, required: false, schema: { type: string } }
+        - { name: query, in: query, required: false, schema: { type: string, maxLength: 200 }, description: Free-text search (same fields as /feedback) }
+        - { name: tenant, in: query, required: false, schema: { type: string, maxLength: 200 } }
+        - { name: date_range, in: query, required: false, schema: { type: string, enum: [last_7_days, last_30_days] } }
+        - { name: date_from, in: query, required: false, schema: { type: string, format: date } }
+        - { name: date_to, in: query, required: false, schema: { type: string, format: date } }
+        - { name: sort, in: query, required: false, schema: { type: string, enum: [newest, oldest, negative_first], default: newest } }
       responses:
         '200':
           description: Export file (attachment).
