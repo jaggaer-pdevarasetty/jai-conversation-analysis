@@ -43,11 +43,25 @@ class Settings:
     chat_db_schema: str = os.getenv("CHAT_DB_SCHEMA", "jai_agentos_schema_uit")
     chatdb_limit: int = int(os.getenv("CHATDB_LIMIT", "200"))
 
-    # LangSmith (read) — authoritative tokens/latency + source of real conversations.
+    # LangSmith (read) — authoritative tokens/latency + per-conversation enrichment traces.
     langsmith_base_url: str = os.getenv("LANGSMITH_BASE_URL", "https://api.smith.langchain.com")
-    langsmith_api_key: str = os.getenv("LANGSMITH_API_KEY", "")
-    langsmith_project: str = os.getenv("LANGSMITH_PROJECT", "jai-orchestrator")
+    # Accept LANGSMITH_API_KEY or the UIT-specific var the platform team uses.
+    langsmith_api_key: str = os.getenv("LANGSMITH_API_KEY", "") or os.getenv("LANGSMITH_API_KEY_UIT", "")
+    langsmith_project: str = os.getenv("LANGSMITH_PROJECT", "")  # single-project fallback
     langsmith_limit: int = int(os.getenv("LANGSMITH_LIMIT", "1000"))  # total runs cap (paginated)
+
+    # ── LLM enrichment (ADR-0018): give the classifier orchestrator context + LangSmith trace
+    # signals. All user text is PII/quasi-identifier scrubbed and all secrets stripped first. ──
+    # Toggle (default ON only when a LangSmith key is present).
+    enrichment_enabled: bool = os.getenv("ENRICHMENT_ENABLED", "").lower() in ("1", "true", "yes") or (
+        os.getenv("ENRICHMENT_ENABLED", "") == ""
+        and bool(os.getenv("LANGSMITH_API_KEY", "") or os.getenv("LANGSMITH_API_KEY_UIT", ""))
+    )
+    # Orchestrator source (READ-ONLY) — distilled scope/tools/settings + per-tenant rules.
+    orch_src_path: str = os.getenv("ORCH_SRC_PATH", "")
+    orch_profile_enabled: bool = os.getenv("ORCH_PROFILE_ENABLED", "true").lower() == "true"
+    # Cap on LangSmith traces fetched per conversation (bounds cost/latency).
+    enrichment_max_runs: int = int(os.getenv("ENRICHMENT_MAX_RUNS", "20"))
 
     # Conversation source: "fixtures" (samples) | "chatdb" (REAL, canonical) | "langsmith".
     source: str = os.getenv("SOURCE", "fixtures")
@@ -86,6 +100,16 @@ class Settings:
     @property
     def vertex_configured(self) -> bool:
         return bool(self.vertex_project and self.vertex_location)
+
+    def langsmith_project_for(self, region: str) -> str:
+        """LangSmith project name for a region. Default convention: uit_<region>.
+        Override with REGION_<X>_LANGSMITH_PROJECT, or LANGSMITH_PROJECT for single-project."""
+        env = os.getenv(f"REGION_{region.upper()}_LANGSMITH_PROJECT", "")
+        if env:
+            return env
+        if self.langsmith_project:
+            return self.langsmith_project
+        return f"uit_{region.lower()}" if region else ""
 
     def regions(self) -> "list[RegionConfig]":
         """Configured regional chat DBs.

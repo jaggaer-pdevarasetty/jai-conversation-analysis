@@ -263,6 +263,7 @@ def _conversation_detail(conversation_id: str) -> dict | None:
             "analyzed_at": record.analyzed_at,
         },
         "deep": asdict(record.deep) if record.deep else None,
+        "enrichment": asdict(record.enrichment) if record.enrichment else None,
         "metrics": _metrics(record),
         "messages": [
             {

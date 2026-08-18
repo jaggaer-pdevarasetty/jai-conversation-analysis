@@ -58,14 +58,39 @@ _PII = [
     (re.compile(r"\b(?:\d[ -]?){13,19}\b"), "[card]"),  # 13-19 digit card-like sequences
     (re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b"), "[ip]"),
     (re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), "[ssn]"),
-    (re.compile(r"\+?\d[\d ().-]{7,}\d"), "[phone]"),  # keep last: broadest digit run
+]
+
+# Quasi-identifiers: values that alone aren't PII but combined can re-identify a person
+# (dates + amounts + reference numbers/codes). Blurred to cut re-identification risk while
+# keeping the topic intact — the classifier needs "a requisition number", not the number.
+_QUASI = [
+    (re.compile(r"[$€£₹]\s?\d[\d.,]*\b"), "[amount]"),  # $3,703.85 / €1.200,50
+    (re.compile(r"\b\d[\d.,]*\s?(?:USD|EUR|GBP|INR|CAD|AUD)\b", re.IGNORECASE), "[amount]"),
+    (re.compile(r"\b\d{4}-\d{2}-\d{2}\b"), "[date]"),  # 2026-08-12
+    (re.compile(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b"), "[date]"),  # 8/12/2026
+    (re.compile(
+        r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}\b",
+        re.IGNORECASE), "[date]"),  # Aug 12, 2026
+    (re.compile(
+        r"\b\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{4}\b",
+        re.IGNORECASE), "[date]"),  # 12 August 2026
+    # Reference codes: a letter prefix + a hyphen + a LONG digit run (>=5), e.g. PO-000123,
+    # REQ-1234567. The long digit run is what makes it identifier-like, so ordinary
+    # product/version names (COVID-19, UTF-8, SAP-2000, HTTP-500, gemini-2.5) are left intact.
+    (re.compile(r"\b[A-Za-z]{2,}-\d{5,}\b"), "[id]"),
+]
+
+# Broad catch-alls LAST so they don't eat the specific matches above.
+_PII_TAIL = [
+    (re.compile(r"\+?\d[\d ().-]{7,}\d"), "[phone]"),
+    (re.compile(r"\b\d{6,}\b"), "[id]"),  # long bare number (requisition/PO/order id)
 ]
 
 
 def scrub_pii(text: str) -> str:
-    """Redact obvious PII before any text is sent to the LLM."""
+    """Redact PII + quasi-identifiers before any text is sent to the LLM or stored."""
     out = text
-    for pattern, tag in _PII:
+    for pattern, tag in [*_PII, *_QUASI, *_PII_TAIL]:
         out = pattern.sub(tag, out)
     return out
 

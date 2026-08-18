@@ -9,11 +9,24 @@ Two layers:
 
 from __future__ import annotations
 
+import hashlib
 from functools import lru_cache
 
 from .domain.signals import scrub_pii as _regex_redact
 
+# PERSON/GPE/LOC/FAC = names + places/buildings (quasi-identifiers). ORG kept too, but note the
+# orchestrator profile / tenant rules are passed SEPARATELY and are NOT run through this (they
+# are config, not user data), so platform names like "ShopBlue" survive there for accuracy.
 _NER_LABELS = {"PERSON", "GPE", "LOC", "ORG", "FAC"}
+
+
+def pseudonymize(prefix: str, value) -> str | None:
+    """One-way stable pseudonym for an identifier (user id/name/email). Never reversible.
+    Lets us group ("same user") without sending the raw identity to the LLM or storing it."""
+    if value in (None, ""):
+        return None
+    digest = hashlib.sha256(f"{prefix}:{value}".encode()).hexdigest()[:12]
+    return f"{prefix}-{digest}"
 
 
 @lru_cache(maxsize=1)
