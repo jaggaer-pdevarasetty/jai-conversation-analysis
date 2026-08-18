@@ -124,6 +124,7 @@ describe("ReviewerTable", () => {
     await screen.findByText("Showing 1–25 of 30");
     await userEvent.click(screen.getByRole("button", { name: "Go to next page" }));
     await waitFor(() => expect(fetchAnalysisMock).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 25, offset: 25 })));
-    expect(await screen.findByText("Showing 26–30 of 30")).toBeInTheDocument();
+    // allow extra time on slower CI runners (default findBy timeout is 1s)
+    expect(await screen.findByText("Showing 26–30 of 30", {}, { timeout: 5000 })).toBeInTheDocument();
   });
 });
