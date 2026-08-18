@@ -7,7 +7,7 @@ import { useRegion } from "./RegionContext";
 
 /** Global region switcher in the app bar. Changing it refreshes every data page. */
 export function RegionSelect() {
-  const { region, setRegion, regions } = useRegion();
+  const { region, setRegion, regions, loading } = useRegion();
   const router = useRouter();
 
   return (
@@ -15,14 +15,19 @@ export function RegionSelect() {
       select
       size="small"
       value={region}
+      disabled={loading}
       onChange={(event) => {
         setRegion(event.target.value);
         router.push("/");
       }}
-      aria-label="Region"
-      sx={{ minWidth: 172, bgcolor: "#FFFFFF", "& .MuiInputBase-root": { borderRadius: 2 } }}
+      sx={{ width: { xs: 150, sm: 172 }, bgcolor: "#FFFFFF", "& .MuiInputBase-root": { borderRadius: 2 } }}
       InputProps={{
         startAdornment: <PublicRoundedIcon sx={{ fontSize: 18, mr: 0.75, color: "text.secondary" }} />,
+      }}
+      SelectProps={{
+        displayEmpty: true,
+        inputProps: { "aria-label": "Region" },
+        renderValue: (value) => loading ? "Loading…" : value ? String(value).toUpperCase() : "All regions",
       }}
     >
       <MenuItem value="">All regions</MenuItem>

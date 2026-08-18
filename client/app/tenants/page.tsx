@@ -61,7 +61,7 @@ export default function TenantsPage() {
 
   if (!tenants) {
     return (
-      <Stack spacing={2.5} aria-label="Loading tenants">
+      <Stack spacing={2.5} role="status" aria-label="Loading tenants">
         <Skeleton variant="rounded" height={100} />
         <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(3, 1fr)" }, gap: 2 }}>
           {[1, 2, 3].map((item) => <Skeleton key={item} variant="rounded" height={126} />)}
@@ -143,9 +143,9 @@ export default function TenantsPage() {
       ) : (
         <Paper sx={{ py: 8, px: 3, textAlign: "center" }}>
           <SearchRoundedIcon sx={{ fontSize: 36, color: "text.disabled" }} />
-          <Typography variant="h3" sx={{ mt: 1 }}>No tenants match</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>Try searching with a different tenant name or ID.</Typography>
-          <Button sx={{ mt: 2 }} onClick={() => { setSearch(""); setPage(0); }}>Clear search</Button>
+          <Typography variant="h3" sx={{ mt: 1 }}>{tenants.length ? "No tenants match" : "No tenants available"}</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{tenants.length ? "Try searching with a different tenant name or ID." : "No tenants are available in this region."}</Typography>
+          {tenants.length > 0 && <Button sx={{ mt: 2 }} onClick={() => { setSearch(""); setPage(0); }}>Clear search</Button>}
         </Paper>
       )}
 

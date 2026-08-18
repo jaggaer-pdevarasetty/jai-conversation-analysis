@@ -57,6 +57,10 @@ class CommonStore:
     def is_analysed(self, conversation_id: str) -> bool:
         return conversation_id in self._analyses
 
+    def analysed_ids(self) -> set[str]:
+        """All already-analysed conversation ids (for the manual 'fetch pending' step)."""
+        return set(self._analyses.keys())
+
     def set_override(self, conversation_id: str, category: Category, actor: str) -> AnalysisRecord | None:
         record = self._analyses.get(conversation_id)
         if record is None:

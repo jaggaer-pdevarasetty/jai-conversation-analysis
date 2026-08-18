@@ -8,7 +8,7 @@ is intentionally not used for storing data. Still conversation_id-only and de-id
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, fields
 from datetime import date
 
 from sqlalchemy import (
@@ -80,8 +80,13 @@ def _row_to_rec(data: dict) -> AnalysisRecord:
     d["metrics"] = Metrics(**d["metrics"])
     d["override"] = Override(**d["override"]) if d.get("override") else None
     d["deep"] = DeepAnalysis(**d["deep"]) if d.get("deep") else None
-    d["enrichment"] = Enrichment(**d["enrichment"]) if d.get("enrichment") else None
-    return AnalysisRecord(**d)
+    if d.get("enrichment"):
+        e_allowed = {f.name for f in fields(Enrichment)}
+        d["enrichment"] = Enrichment(**{k: v for k, v in d["enrichment"].items() if k in e_allowed})
+    else:
+        d["enrichment"] = None
+    allowed = {field.name for field in fields(AnalysisRecord)}
+    return AnalysisRecord(**{key: value for key, value in d.items() if key in allowed})
 
 
 def _conv_to_row(c: CommonConversation) -> dict:
@@ -140,6 +145,11 @@ class SqlResultStore:
             return conn.execute(
                 select(_analysis.c.conversation_id).where(_analysis.c.conversation_id == conversation_id)
             ).first() is not None
+
+    def analysed_ids(self) -> set[str]:
+        """All already-analysed conversation ids in one query (for the manual 'fetch pending' step)."""
+        with self._engine.begin() as conn:
+            return {r[0] for r in conn.execute(select(_analysis.c.conversation_id)).all()}
 
     def set_override(self, conversation_id: str, category: Category, actor: str) -> AnalysisRecord | None:
         from datetime import datetime, timezone

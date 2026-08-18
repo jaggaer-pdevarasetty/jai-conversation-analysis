@@ -32,6 +32,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CategoryChip } from "../../../../../src/components/CategoryChip";
+import { MarkdownContent } from "../../../../../src/components/MarkdownContent";
 import { useRegion } from "../../../../../src/components/RegionContext";
 import { StatCard } from "../../../../../src/components/StatCard";
 import {
@@ -128,7 +129,7 @@ export default function UserConversationsPage() {
   }
 
   if (!items) {
-    return <Stack spacing={2.5} aria-label="Loading user conversations"><Skeleton variant="rounded" height={130} /><Skeleton variant="rounded" height={400} /></Stack>;
+    return <Stack spacing={2.5} role="status" aria-label="Loading user conversations"><Skeleton variant="rounded" height={130} /><Skeleton variant="rounded" height={400} /></Stack>;
   }
 
   const analysed = items.filter((conversation) => conversation.status === "analysed").length;
@@ -197,7 +198,7 @@ export default function UserConversationsPage() {
         </TextField>
       </Paper>
 
-      <TableContainer component={Paper}>
+      <TableContainer component={Paper} sx={{ overflowX: "auto" }}>
         <Box sx={{ px: 2.5, py: 2, display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid", borderColor: "divider" }}>
           <Typography variant="h3">Conversations</Typography>
           <Typography variant="body2" color="text.secondary">{visibleItems.length} of {items.length} on this page</Typography>
@@ -229,9 +230,9 @@ export default function UserConversationsPage() {
                 </TableCell>
                 <TableCell><StatusCell c={conversation} /></TableCell>
                 <TableCell sx={{ minWidth: 300, maxWidth: 440 }}>
-                  <Typography variant="body2" color={conversation.recommended_next_step ? "text.primary" : "text.secondary"} sx={{ display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2, overflow: "hidden" }}>
-                    {conversation.recommended_next_step ?? "Analysis has not completed yet."}
-                  </Typography>
+                  <Box sx={{ color: conversation.recommended_next_step ? "text.primary" : "text.secondary", maxHeight: 52, overflow: "hidden" }}>
+                    <MarkdownContent>{conversation.recommended_next_step ?? "Analysis has not completed yet."}</MarkdownContent>
+                  </Box>
                 </TableCell>
                 <TableCell>{conversation.confidence ? <Chip size="small" label={`${conversation.confidence[0].toUpperCase()}${conversation.confidence.slice(1)}`} variant="outlined" /> : <Typography variant="body2" color="text.secondary">—</Typography>}</TableCell>
                 <TableCell align="right">{conversation.message_count ?? "—"}</TableCell>

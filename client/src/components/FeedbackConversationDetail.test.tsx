@@ -6,7 +6,7 @@ const deep = {
   what_happened: "The response missed the requested comparison.",
   why_it_happened: "The answer focused on setup instead of the task.",
   how_to_avoid: "Confirm the user's intended action.",
-  suggestions: "Improve the comparison guidance.",
+  suggestions: '["Use **aliases**.", "Suggest the closest workflow."]',
   user_remark: "**Not useful**",
 };
 
@@ -73,5 +73,7 @@ describe("FeedbackConversationDetail", () => {
     expect(screen.queryByText("**Not useful**")).not.toBeInTheDocument();
     expect(screen.getByText("Bid Collector").tagName).toBe("STRONG");
     expect(screen.getByText("The answer focused on setup instead of the task.")).toBeInTheDocument();
+    expect(screen.getByText("aliases").tagName).toBe("STRONG");
+    expect(screen.getByText("Suggest the closest workflow.")).toBeInTheDocument();
   });
 });

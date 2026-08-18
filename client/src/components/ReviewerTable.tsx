@@ -27,9 +27,10 @@ import {
   Typography,
 } from "@mui/material";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fetchAnalysis, type ListItem } from "../services/analysisApi";
 import { CategoryChip } from "./CategoryChip";
+import { MarkdownContent } from "./MarkdownContent";
 import { useRegion } from "./RegionContext";
 
 const CATEGORY_OPTIONS: Array<{ value: string; label: string }> = [
@@ -82,7 +83,15 @@ export function ReviewerTable() {
   const [reload, setReload] = useState(0);
   const { region, loading: regionLoading } = useRegion();
 
+  const firstSearch = useRef(true);
   useEffect(() => {
+    // Skip the initial mount: the debounce must only reset pagination when the user actually
+    // types. Otherwise the mount timer fires setPage(0) later and can clobber a page the user
+    // just navigated to (a race that flaked on slow CI).
+    if (firstSearch.current) {
+      firstSearch.current = false;
+      return;
+    }
     const timer = setTimeout(() => {
       setPage(0);
       setQuery(search.trim());
@@ -204,7 +213,7 @@ export function ReviewerTable() {
           {error}
         </Alert>
       ) : (
-        <TableContainer component={Paper}>
+        <TableContainer component={Paper} sx={{ overflowX: "auto" }}>
           <Box sx={{ px: 2.5, py: 2, display: "flex", alignItems: "center", gap: 1.25, borderBottom: "1px solid", borderColor: "divider" }}>
             <TuneRoundedIcon sx={{ color: "text.secondary", fontSize: 20 }} />
             <Typography variant="body2" sx={{ fontWeight: 750 }}>
@@ -243,7 +252,7 @@ export function ReviewerTable() {
                     {item.overridden && <Typography variant="caption" sx={{ display: "block", mt: 0.6, color: "warning.dark", fontWeight: 700 }}>Human override</Typography>}
                   </TableCell>
                   <TableCell sx={{ minWidth: 250, maxWidth: 390 }}>
-                    <Typography variant="body2" sx={{ display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2, overflow: "hidden" }}>{item.recommended_next_step}</Typography>
+                    <Box sx={{ maxHeight: 52, overflow: "hidden" }}><MarkdownContent>{item.recommended_next_step}</MarkdownContent></Box>
                   </TableCell>
                   <TableCell>
                     <Chip size="small" variant="outlined" color={confidenceColor(item.confidence)} label={`${item.confidence[0]?.toUpperCase()}${item.confidence.slice(1)}`} />
@@ -264,9 +273,9 @@ export function ReviewerTable() {
                   <TableCell colSpan={7}>
                     <Box sx={{ py: 7, textAlign: "center" }}>
                       <SearchRoundedIcon sx={{ fontSize: 34, color: "text.disabled" }} />
-                      <Typography variant="h3" sx={{ mt: 1 }}>No conversations match</Typography>
-                      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>Try a different ID, action, category, confidence, or review state.</Typography>
-                      <Button sx={{ mt: 2 }} onClick={resetFilters}>Clear filters</Button>
+                      <Typography variant="h3" sx={{ mt: 1 }}>{hasFilters ? "No conversations match" : "No conversations available"}</Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{hasFilters ? "Try a different ID, action, category, confidence, or review state." : "No analysed conversations are available in this scope."}</Typography>
+                      {hasFilters && <Button sx={{ mt: 2 }} onClick={resetFilters}>Clear filters</Button>}
                     </Box>
                   </TableCell>
                 </TableRow>

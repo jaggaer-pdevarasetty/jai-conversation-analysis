@@ -27,7 +27,7 @@ server** (ADR-0006). Real chat-DB / LangSmith / Gemini wiring is gated on creden
 ## Ticket update (2026-08-11)
 J1-93353 was expanded into a full PRD (FR-1..4 + NFRs + AC-1..11). New/changed
 requirements now captured in `03-prd.md` / `06-nfr-slos.md` / `05-architecture.md`:
-scheduled cadence (every 4h, eligible after 5-min inactivity), **de-identification +
+manual analysis trigger (eligible after 5-min inactivity; ADR-0019), **de-identification +
 conversation-ID-only attribution** (ADR-0007), pooled RBAC, retry + visible unanalysed
 count (ADR-0008), telemetry-missing-not-zero, human override (audited), ≥85% accuracy,
 non-English handling. Working on branch **`feature/J1-93353-conversation-analysis`**
@@ -201,12 +201,53 @@ non-English handling. Working on branch **`feature/J1-93353-conversation-analysi
 - Green: **client 22 jest + typecheck + lint + production build; server 81 pytest, 3 skipped;
   OpenAPI YAML valid; read-only posture guard passed**.
 
+## Done — execution increment 16 (whole-frontend UI/UX audit)
+- Fixed the blank All-regions selector with explicit empty-value rendering, a real combobox label,
+  loading/disabled state, and fallback when a saved region becomes unreachable.
+- Prevented small-screen app-bar/search overflow, validated overview ID searches, guarded stale overview
+  and detail responses, and added retry actions to both conversation detail experiences.
+- Rendered remaining recommendation fields as safe Markdown; clarified unfiltered empty states, added
+  keyboard focus treatment, explicit table scrolling, and announced loading states to assistive technology.
+- Audited every frontend route and restarted the dev server only after a clean production build.
+- Green: **client 24 jest + typecheck + lint + production build**; all eight frontend routes return 200.
+
+## Done — execution increment 18 (feedback export + empty-conversation guard)
+- Added a **Download** button on the Feedback page (CSV / PDF / JSON) → `GET /api/analysis/feedback/export`.
+  Each export includes, per feedback conversation: category, confidence, feedback type + user remark,
+  the 3-part root cause (what happened / why / how to avoid), suggestions + recommended action,
+  cost & responsiveness metrics, source metadata, and the full de-identified transcript. CSV/JSON via
+  stdlib; PDF via `fpdf2==2.8.3`. Contract added to `api/openapi.yaml`.
+- Stopped analysing conversations with **no messages** (empty/purged source rows): eligibility +
+  queue + on-demand all skip them (was producing hallucinated "resolved" labels); cleaned up the
+  308 pre-existing empty-transcript analyses.
+
+## Done — execution increment 17 (feedback tenant/date filters + Markdown tables)
+- Added server-backed feedback filters for tenant name, Last 7 days, Last 30 days, and custom
+  activity-date ranges; updated the OpenAPI contract and responsive filter layout.
+- Extended the safe Markdown renderer with scrollable pipe tables; raw HTML is rendered as safe
+  escaped text (React text nodes — never executed, and no longer regex-stripped so content is not
+  lost); serialized suggestion arrays now display as formatted bullet lists.
+- Verified the reported conversation live: University of Utah, Last 7 days, and Aug 13 custom-date
+  filters all return it, and the feedback list/detail routes return 200 after service restarts.
+- Green: **client 25 jest + typecheck + lint + production build; server 82 pytest, 3 skipped;
+  OpenAPI YAML valid; read-only posture guard passed**.
+
+## Done — execution increment 18 (EU migration completed)
+- Diagnosed two EU layouts: a 19-thread platform schema and the authoritative 1,600-conversation
+  classic chat schema. Added read-only compatibility for both while keeping US/UK unchanged.
+- After classic-schema access was corrected, deleted exactly the 19 approved platform-derived rows
+  from the service-owned result store; no source/org data was modified.
+- Migrated all **1,600 non-deleted EU conversations** through the normal de-identification + Vertex
+  boundary. Final categories: 977 resolved, 544 failed-to-resolve, 16 positive feedback,
+  17 negative feedback, and 46 out-of-scope.
+- Live verification without restarting the active backend: EU source/overview/API totals all 1,600;
+  queue 0, in-flight 0, dead-letter 0, unanalysed 0; read-only posture guard passed.
+- SQL result loading now ignores obsolete extra JSON fields such as legacy `enrichment` metadata.
+
 ## Next
-1. Repopulate `analysis` from `chatdb` via Vertex + restart backend (approved) → UI shows real data.
-2. Fix `.env`: `CHAT_DB_URL` db = `jai_agentos_uit`, `CHAT_DB_SCHEMA=jai_agentos_schema_uit`, `SOURCE=chatdb`.
-3. Grow the eval gold set to 100–200 real labelled conversations (≥85% gate).
-4. Add server-side search/pagination and trend endpoints once review volume requires them.
-5. Scheduler wiring (every 4h) with rate-limit-aware batch.
+1. Grow the eval gold set to 100–200 real labelled conversations (≥85% gate).
+2. Add server-side search/pagination and trend endpoints once review volume requires them.
+3. ~~Scheduler wiring (every 4h)~~ — replaced by a manual analysis trigger (ADR-0019).
 
 ## Blockers / needs
 - **Credentials:** LangSmith read key; chat DB read-only connection details; Gemini access.

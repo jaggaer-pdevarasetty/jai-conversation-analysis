@@ -6,9 +6,11 @@ RBAC: reviewer-only (gate configurable). RFC 7807 error bodies.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import asdict
+from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -49,17 +51,64 @@ from .queue import AnalysisQueue  # noqa: E402
 
 analysis_queue = AnalysisQueue(store, make_batch_analyzer(), workers=settings.queue_workers)
 
-def _sweep() -> None:
-    """Enqueue every eligible, not-yet-analysed conversation (deduped by the queue)."""
-    from .chatdb import eligible_conversation_ids
+def _eligible_by_region(region: str | None = None) -> dict[str, list[str]]:
+    """{region_label: eligible ids}. One region if given, else all configured. A region that
+    errors (e.g. permission denied) is skipped so it can't block the others."""
+    from .chatdb import _eligible_in_region, configured_regions, resolve_region
 
-    analysis_queue.enqueue(eligible_conversation_ids())
+    regions = [resolve_region(region)] if region else configured_regions()
+    out: dict[str, list[str]] = {}
+    for r in regions:
+        if r is None:
+            continue
+        try:
+            out[r.label] = _eligible_in_region(r, None, None)
+        except Exception as exc:  # noqa: BLE001 - one bad region must not stop the rest
+            print(f"[warn] eligibility skipped region '{r.label}': {type(exc).__name__}", flush=True)
+            out[r.label] = []
+    return out
 
 
-scheduler = None
+def _sweep(region: str | None = None) -> None:
+    """Enqueue every eligible, not-yet-analysed conversation (deduped by the queue). Limited to
+    `region` when given, else all configured regions. Pre-filters with a single analysed_ids()
+    query so we don't fire one is_analysed() round-trip per eligible id on every trigger."""
+    analysed = store.analysed_ids()
+    ids = [cid for ids in _eligible_by_region(region).values() for cid in ids if cid not in analysed]
+    analysis_queue.enqueue(ids)
+
+
+_sweep_lock = threading.Lock()
+_sweep_running = False
+
+
+def trigger_sweep(region: str | None = None) -> bool:
+    """Manual trigger: run a check + analyse sweep in the background (deduped; only
+    not-yet-analysed conversations are processed) for `region` (or all). Returns False if a
+    sweep is already running, so repeated button clicks don't pile up."""
+    global _sweep_running
+    with _sweep_lock:
+        if _sweep_running:
+            return False
+        _sweep_running = True
+
+    def _run() -> None:
+        global _sweep_running
+        try:
+            _sweep(region)
+        except Exception as exc:  # noqa: BLE001 - chat DB may be unreachable; never crash
+            print(f"[warn] manual sweep failed: {type(exc).__name__}", flush=True)
+        finally:
+            with _sweep_lock:
+                _sweep_running = False
+
+    threading.Thread(target=_run, name="manual-sweep", daemon=True).start()
+    return True
+
+
 region_health: list[dict] = []  # per-region connectivity, checked once at startup
 if settings.source == "chatdb":
-    # Test EVERY configured region before serving: connect + verify the 4 required tables.
+    # Test EVERY configured region before serving: connect + verify the required tables.
     # We log and continue (a bad/permission-denied region must not crash the app or leak data).
     from .chatdb import check_regions
 
@@ -70,15 +119,9 @@ if settings.source == "chatdb":
     if not any(h["ok"] for h in region_health):
         print("[startup][warn] NO region is readable — dashboards will be empty until fixed.", flush=True)
 
+    # MANUAL mode: workers are ready, but analysis runs ONLY when triggered from the UI
+    # (POST /analyze/sweep). No boot sweep and no scheduled cadence.
     analysis_queue.start()
-    try:
-        _sweep()  # initial full-coverage sweep at boot (non-blocking)
-    except Exception as exc:  # noqa: BLE001 - chat DB may be unreachable; UI still works
-        print(f"[warn] startup sweep failed: {type(exc).__name__}", flush=True)
-    from .scheduler import Scheduler  # every SCHEDULE_HOURS: pick up new/eligible convos (AC-1)
-
-    scheduler = Scheduler(settings.schedule_hours * 3600, _sweep)
-    scheduler.start()
     latest_run = run_analysis(store, [], analyze_batch=make_batch_analyzer())  # empty summary
 else:
     # fixtures / langsmith: seed synchronously so the pooled list is populated immediately.
@@ -298,6 +341,10 @@ def feedback_conversations(
     rating: str | None = Query(default=None, pattern="^(positive|negative)$"),
     category: str | None = Query(default=None),
     query: str | None = Query(default=None, max_length=200),
+    tenant: str | None = Query(default=None, max_length=200),
+    date_range: str | None = Query(default=None, pattern="^(last_7_days|last_30_days)$"),
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
     sort: str = Query(default="newest", pattern="^(newest|oldest|negative_first)$"),
     limit: int = Query(default=10, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
@@ -313,6 +360,8 @@ def feedback_conversations(
         return bad
     if category is not None and category not in CATEGORIES:
         return problem_response(400, "Invalid category", f"Unknown category: {category}")
+    if date_from and date_to and date_from > date_to:
+        return problem_response(400, "Invalid date range", "date_from must be on or before date_to")
     items = []
     records = store.list(region=region)
     conversations = store.get_conversations([record.conversation_id for record in records])
@@ -372,8 +421,11 @@ def feedback_conversations(
             item.update(meta.get(item["conversation_id"], {}))
 
     text_query = (query or "").strip().lower()
-    if text_query:
+    tenant_query = (tenant or "").strip().lower()
+    needs_meta = bool(text_query or tenant_query or date_range or date_from or date_to)
+    if needs_meta:
         _enrich(items)
+    if text_query:
         items = [
             item for item in items
             if any(
@@ -383,6 +435,30 @@ def feedback_conversations(
                     "recommended_next_step", "why_it_happened",
                 )
             )
+        ]
+    if tenant_query:
+        items = [item for item in items if tenant_query in str(item.get("tenant_name") or "").lower()]
+
+    range_start = date_from
+    range_end = date_to
+    if date_range:
+        range_end = datetime.now(timezone.utc).date()
+        range_start = range_end - timedelta(days=6 if date_range == "last_7_days" else 29)
+    if range_start or range_end:
+        def _activity_day(item):
+            value = item.get("last_message_at") or item.get("analyzed_at")
+            if not value:
+                return None
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+            except (ValueError, TypeError):
+                return None  # legacy/odd timestamp → treat as undated (don't 500)
+
+        items = [
+            item for item in items
+            if (day := _activity_day(item)) is not None
+            and (range_start is None or day >= range_start)
+            and (range_end is None or day <= range_end)
         ]
 
     def _rank(item) -> int:  # thumbs-down first, then negative outcomes, then thumbs-up, then rest
@@ -402,7 +478,7 @@ def feedback_conversations(
         items.sort(key=_rank)
     total = len(items)
     page = items[offset : offset + limit]
-    if not text_query:
+    if not needs_meta:
         _enrich(page)
     return {
         "items": page,
@@ -416,6 +492,48 @@ def feedback_conversations(
         "limit": limit,
         "offset": offset,
     }
+
+
+@api.get("/feedback/export")
+def feedback_export(
+    format: str = Query(default="csv", pattern="^(csv|json|pdf)$"),
+    scope: str = Query(default="all", pattern="^(thumbs|outcomes|all)$"),
+    region: str | None = Query(default=None),
+    rating: str | None = Query(default=None, pattern="^(positive|negative)$"),
+    category: str | None = Query(default=None),
+    query: str | None = Query(default=None, max_length=200),
+    tenant: str | None = Query(default=None, max_length=200),
+    date_range: str | None = Query(default=None, pattern="^(last_7_days|last_30_days)$"),
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    sort: str = Query(default="newest", pattern="^(newest|oldest|negative_first)$"),
+):
+    """Download the feedback conversations for the current view (all matching rows, no
+    pagination) with full detail — category, confidence, feedback + user remark, 3-part root
+    cause, suggestions + recommended action, cost & responsiveness, and the full de-identified
+    transcript — as CSV, JSON, or PDF. Honours the same filters as GET /feedback."""
+    if (bad := _bad_region(region)) is not None:
+        return bad
+    if category is not None and category not in CATEGORIES:
+        return problem_response(400, "Invalid category", f"Unknown category: {category}")
+    if date_from and date_to and date_from > date_to:
+        return problem_response(400, "Invalid date range", "date_from must be on or before date_to")
+    from . import export
+
+    rows = export.collect_rows(
+        store, scope=scope, region=region, rating=rating, category=category,
+        query=query, tenant=tenant, date_range=date_range,
+        date_from=date_from, date_to=date_to, sort=sort,
+    )
+    data, media = export.render(rows, format)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    ext = {"json": "json", "pdf": "pdf"}.get(format, "csv")
+    filename = f"feedback-{scope}-{region or 'all'}-{stamp}.{ext}"
+    return Response(
+        content=data,
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @api.post("/conversations/{conversation_id}/analyze")
@@ -438,6 +556,8 @@ def analyze_conversation(conversation_id: str):
         return problem_response(503, "Chat DB unavailable", type(exc).__name__)
     if conv is None:
         return problem_response(404, "Not found", f"No source conversation {conversation_id}")
+    if not conv.messages:  # empty conversation → nothing to analyse (avoid a hallucinated label)
+        return problem_response(422, "No transcript", "This conversation has no messages to analyse.")
 
     now = datetime.now(timezone.utc)
     records = make_batch_analyzer()([conv], f"ondemand_{uuid.uuid4().hex[:8]}", now.isoformat())
@@ -562,6 +682,58 @@ def queue_stats(
 ):
     """Queue health: depth, in-flight, dead-letter, capacity, workers."""
     return analysis_queue.stats(limit=limit, offset=offset)
+
+
+@api.get("/analyze/pending")
+def analyze_pending(region: str | None = Query(default=None)):
+    """Step 1 of the manual flow: FETCH (don't analyse) the eligible, not-yet-analysed
+    conversations for the selected region (or all regions), returning the total, a per-region
+    breakdown, and brief details for a sample. The UI then shows a 'Start analysis' button."""
+    if settings.source != "chatdb":
+        return {"count": 0, "ids": [], "by_region": {}, "items": [], "region": region, "source": settings.source}
+    if (bad := _bad_region(region)) is not None:
+        return bad
+    from . import dashboard
+
+    analysed = store.analysed_ids()
+    by_ids = {lbl: [i for i in ids if i not in analysed] for lbl, ids in _eligible_by_region(region).items()}
+    by_region = {lbl: len(ids) for lbl, ids in by_ids.items()}
+    all_ids = [i for ids in by_ids.values() for i in ids]
+    # Brief, privacy-aware details for a small sample (good UX; conversation_meta applies
+    # pooled-mode pseudonyms when configured).
+    sample = all_ids[:15]
+    meta = dashboard.conversation_meta(sample, region=region) if sample else {}
+    items = [
+        {
+            "conversation_id": cid,
+            "region": meta.get(cid, {}).get("region"),
+            "tenant_name": meta.get(cid, {}).get("tenant_name"),
+            "title": meta.get(cid, {}).get("title"),
+            "last_message_at": meta.get(cid, {}).get("last_message_at"),
+        }
+        for cid in sample
+    ]
+    return {
+        "count": len(all_ids),
+        "ids": all_ids[:1000],
+        "by_region": by_region,
+        "items": items,
+        "region": region,
+        "source": settings.source,
+    }
+
+
+@api.post("/analyze/sweep", status_code=202)
+def analyze_sweep(region: str | None = Query(default=None)):
+    """Step 2 of the manual flow: analyse every not-yet-analysed conversation for the selected
+    region (or all). Deduped; runs in the background — poll GET /queue for progress. Returns
+    'already_running' if a sweep is still in flight."""
+    if settings.source != "chatdb":
+        return problem_response(400, "Not available", "Manual analysis applies to the chat DB source only.")
+    if (bad := _bad_region(region)) is not None:
+        return bad
+    started = trigger_sweep(region)
+    return {"status": "started" if started else "already_running", "region": region, "source": settings.source}
 
 
 @api.get("/stats")

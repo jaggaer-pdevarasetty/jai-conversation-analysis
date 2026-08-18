@@ -34,6 +34,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CATEGORIES, fetchFeedback, type FeedbackItem, type FeedbackListResponse } from "../../src/services/analysisApi";
 import { CATEGORY_META, CategoryChip } from "../../src/components/CategoryChip";
+import { DownloadFeedbackButton } from "../../src/components/DownloadFeedbackButton";
 import { MarkdownContent } from "../../src/components/MarkdownContent";
 import { useRegion } from "../../src/components/RegionContext";
 import { StatCard } from "../../src/components/StatCard";
@@ -54,20 +55,29 @@ export default function FeedbackPage() {
   const [data, setData] = useState<FeedbackListResponse | null>(null);
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
+  const [tenantSearch, setTenantSearch] = useState("");
+  const [tenant, setTenant] = useState("");
   const [rating, setRating] = useState("");
   const [category, setCategory] = useState("");
+  const [dateRange, setDateRange] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [sort, setSort] = useState("newest");
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const requestId = useRef(0);
+  const invalidDateRange = Boolean(dateFrom && dateTo && dateFrom > dateTo);
   const { region, loading: regionLoading } = useRegion();
 
   useEffect(() => {
-    const timer = setTimeout(() => setQuery(search.trim()), 300);
+    const timer = setTimeout(() => {
+      setQuery(search.trim());
+      setTenant(tenantSearch.trim());
+    }, 300);
     return () => clearTimeout(timer);
-  }, [search]);
+  }, [search, tenantSearch]);
 
   const load = useCallback(() => {
     const currentRequest = ++requestId.current;
@@ -78,6 +88,10 @@ export default function FeedbackPage() {
       rating,
       category,
       query,
+      tenant,
+      date_range: dateRange,
+      date_from: dateFrom,
+      date_to: dateTo,
       sort,
       limit: rowsPerPage,
       offset: page * rowsPerPage,
@@ -91,18 +105,23 @@ export default function FeedbackPage() {
       .finally(() => {
         if (currentRequest === requestId.current) setLoading(false);
       });
-  }, [category, page, query, rating, region, rowsPerPage, sort]);
+  }, [category, dateFrom, dateRange, dateTo, page, query, rating, region, rowsPerPage, sort, tenant]);
 
   useEffect(() => {
+    if (invalidDateRange) {
+      requestId.current += 1;
+      setLoading(false);
+      return;
+    }
     if (!regionLoading) load();
-  }, [load, regionLoading]);
+  }, [invalidDateRange, load, regionLoading]);
 
   if (error) {
     return <Alert severity="error" action={<Button color="inherit" onClick={load}>Try again</Button>}><AlertTitle>Feedback unavailable</AlertTitle>{error}</Alert>;
   }
 
   if (!data) {
-    return <Stack spacing={2.5} aria-label="Loading feedback"><Skeleton variant="rounded" height={120} /><Skeleton variant="rounded" height={130} /><Skeleton variant="rounded" height={440} /></Stack>;
+    return <Stack spacing={2.5} role="status" aria-label="Loading feedback"><Skeleton variant="rounded" height={120} /><Skeleton variant="rounded" height={130} /><Skeleton variant="rounded" height={440} /></Stack>;
   }
 
   const positive = data.positive;
@@ -111,14 +130,19 @@ export default function FeedbackPage() {
   const deepAnalysed = data.deep_analysed ?? data.items.filter((item) => item.deep).length;
   const negativeRate = scopeTotal ? Math.round((negative / scopeTotal) * 100) : 0;
   const deepCoverage = scopeTotal ? Math.round((deepAnalysed / scopeTotal) * 100) : 0;
-  const visibleItems = data.limit === undefined ? data.items.slice(page * rowsPerPage, (page + 1) * rowsPerPage) : data.items;
-  const hasFilters = Boolean(search || rating || category || sort !== "newest");
+  const visibleItems = data.items;
+  const hasFilters = Boolean(search || tenantSearch || rating || category || dateRange || dateFrom || dateTo || sort !== "newest");
 
   function clearFilters() {
     setSearch("");
     setQuery("");
+    setTenantSearch("");
+    setTenant("");
     setRating("");
     setCategory("");
+    setDateRange("");
+    setDateFrom("");
+    setDateTo("");
     setSort("newest");
     setPage(0);
   }
@@ -133,7 +157,22 @@ export default function FeedbackPage() {
             Explicit thumbs ratings connected to conversation context, root-cause analysis, remediation guidance, and operational telemetry.
           </Typography>
         </Box>
-        <Chip icon={<ChatBubbleOutlineRoundedIcon />} label="Explicit feedback only" variant="outlined" sx={{ bgcolor: "#FFFFFF" }} />
+        <Stack direction="row" spacing={1.5} alignItems="center">
+          <Chip icon={<ChatBubbleOutlineRoundedIcon />} label="Explicit feedback only" variant="outlined" sx={{ bgcolor: "#FFFFFF" }} />
+          <DownloadFeedbackButton
+            region={region}
+            scope="thumbs"
+            rating={rating}
+            category={category}
+            query={query}
+            tenant={tenant}
+            date_range={dateRange}
+            date_from={dateFrom}
+            date_to={dateTo}
+            sort={sort}
+            disabled={invalidDateRange}
+          />
+        </Stack>
       </Box>
 
       {negative > 0 && (
@@ -150,16 +189,17 @@ export default function FeedbackPage() {
         <StatCard label="Deep analysis coverage" value={`${deepCoverage}%`} helper="Records with root-cause guidance" icon={<InsightsRoundedIcon />} tone="#6B55B5" />
       </Box>
 
-      <Paper sx={{ p: 2, display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))", xl: "minmax(280px, 1.4fr) repeat(3, minmax(180px, 1fr))" }, gap: 1.5 }}>
+      <Paper sx={{ p: 2, display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))", xl: "repeat(4, minmax(0, 1fr))" }, gap: 1.5 }}>
         <TextField
           fullWidth
           size="small"
           label="Search feedback"
-          placeholder="Remark, title, tenant, user, or conversation ID"
+          placeholder="Remark, title, user, or conversation ID"
           value={search}
           onChange={(event) => { setSearch(event.target.value); setPage(0); }}
           InputProps={{ startAdornment: <InputAdornment position="start"><SearchRoundedIcon fontSize="small" /></InputAdornment> }}
         />
+        <TextField fullWidth size="small" label="Tenant name" placeholder="Filter by tenant" value={tenantSearch} onChange={(event) => { setTenantSearch(event.target.value); setPage(0); }} />
         <TextField fullWidth select size="small" label="Sentiment" value={rating} onChange={(event) => { setRating(event.target.value); setPage(0); }}>
           <MenuItem value="">All ratings</MenuItem>
           <MenuItem value="negative">Negative</MenuItem>
@@ -169,6 +209,13 @@ export default function FeedbackPage() {
           <MenuItem value="">All categories</MenuItem>
           {CATEGORIES.map((value) => <MenuItem key={value} value={value}>{CATEGORY_META[value].label}</MenuItem>)}
         </TextField>
+        <TextField fullWidth select size="small" label="Activity period" value={dateRange} onChange={(event) => { setDateRange(event.target.value); setDateFrom(""); setDateTo(""); setPage(0); }} InputLabelProps={{ shrink: true }} SelectProps={{ displayEmpty: true, renderValue: (value) => value === "last_7_days" ? "Last 7 days" : value === "last_30_days" ? "Last 30 days" : dateFrom || dateTo ? "Custom range" : "All time" }}>
+          <MenuItem value="">All time</MenuItem>
+          <MenuItem value="last_7_days">Last 7 days</MenuItem>
+          <MenuItem value="last_30_days">Last 30 days</MenuItem>
+        </TextField>
+        <TextField fullWidth size="small" type="date" label="From date" value={dateFrom} error={invalidDateRange} onChange={(event) => { setDateFrom(event.target.value); setDateRange(""); setPage(0); }} InputLabelProps={{ shrink: true }} />
+        <TextField fullWidth size="small" type="date" label="To date" value={dateTo} error={invalidDateRange} helperText={invalidDateRange ? "To date must be on or after From date." : undefined} onChange={(event) => { setDateTo(event.target.value); setDateRange(""); setPage(0); }} InputLabelProps={{ shrink: true }} />
         <TextField fullWidth select size="small" label="Sort" value={sort} onChange={(event) => { setSort(event.target.value); setPage(0); }}>
           <MenuItem value="newest">Newest conversation</MenuItem>
           <MenuItem value="oldest">Oldest conversation</MenuItem>
@@ -176,7 +223,7 @@ export default function FeedbackPage() {
         </TextField>
       </Paper>
 
-      <TableContainer component={Paper}>
+      <TableContainer component={Paper} sx={{ overflowX: "auto" }} aria-busy={loading}>
         {loading && <LinearProgress aria-label="Loading feedback filters" />}
         <Box sx={{ px: 2.5, py: 2, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, borderBottom: "1px solid", borderColor: "divider" }}>
           <Box>
@@ -242,7 +289,7 @@ export default function FeedbackPage() {
                 </TableCell>
               </TableRow>
             )) : (
-              <TableRow><TableCell colSpan={7}><Box sx={{ py: 8, textAlign: "center" }}><ErrorOutlineRoundedIcon sx={{ fontSize: 38, color: "text.disabled" }} /><Typography variant="h3" sx={{ mt: 1 }}>No feedback matches</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>Try a different sentiment, category, or search term.</Typography><Button sx={{ mt: 2 }} onClick={clearFilters}>Clear filters</Button></Box></TableCell></TableRow>
+              <TableRow><TableCell colSpan={7}><Box sx={{ py: 8, textAlign: "center" }}><ErrorOutlineRoundedIcon sx={{ fontSize: 38, color: "text.disabled" }} /><Typography variant="h3" sx={{ mt: 1 }}>{hasFilters ? "No feedback matches" : "No feedback available"}</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{hasFilters ? "Try a different sentiment, category, or search term." : "No explicit feedback has been recorded in this scope."}</Typography>{hasFilters && <Button sx={{ mt: 2 }} onClick={clearFilters}>Clear filters</Button>}</Box></TableCell></TableRow>
             )}
           </TableBody>
         </Table>

@@ -40,6 +40,10 @@ paths:
         - { name: rating, in: query, required: false, schema: { type: string, enum: [positive, negative] } }
         - { name: category, in: query, required: false, schema: { $ref: '#/components/schemas/Category' } }
         - { name: query, in: query, required: false, schema: { type: string }, description: Search feedback, source metadata, recommendation, or conversation ID. }
+        - { name: tenant, in: query, required: false, schema: { type: string }, description: Case-insensitive tenant-name filter. }
+        - { name: date_range, in: query, required: false, schema: { type: string, enum: [last_7_days, last_30_days] } }
+        - { name: date_from, in: query, required: false, schema: { type: string, format: date } }
+        - { name: date_to, in: query, required: false, schema: { type: string, format: date } }
         - { name: sort, in: query, required: false, schema: { type: string, enum: [newest, oldest, negative_first], default: newest } }
         - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 10 } }
         - { name: offset, in: query, required: false, schema: { type: integer, minimum: 0, default: 0 } }
@@ -98,6 +102,63 @@ paths:
       summary: Trigger an analysis run (scheduler / reviewer)
       responses:
         '200': { description: Run summary., content: { application/json: { schema: { $ref: '#/components/schemas/RunSummary' } } } }
+  /api/analysis/feedback/export:
+    get:
+      tags: [analysis]
+      operationId: feedbackExport
+      summary: Download feedback conversations (full detail) as CSV, JSON, or PDF
+      description: >-
+        Exports ALL feedback conversations in scope (no pagination) with full detail: category,
+        confidence, feedback type + user remark, the 3-part root-cause analysis (what happened /
+        why / how to avoid), suggestions + recommended action, cost & responsiveness metrics, and
+        the full de-identified transcript. Returned as a file attachment.
+      parameters:
+        - { name: format, in: query, required: false, schema: { type: string, enum: [csv, json, pdf], default: csv } }
+        - { name: scope, in: query, required: false, schema: { type: string, enum: [thumbs, outcomes, all], default: all } }
+        - { name: region, in: query, required: false, schema: { type: string } }
+        - { name: rating, in: query, required: false, schema: { type: string, enum: [positive, negative] } }
+        - { name: category, in: query, required: false, schema: { type: string } }
+        - { name: query, in: query, required: false, schema: { type: string, maxLength: 200 }, description: Free-text search (same fields as /feedback) }
+        - { name: tenant, in: query, required: false, schema: { type: string, maxLength: 200 } }
+        - { name: date_range, in: query, required: false, schema: { type: string, enum: [last_7_days, last_30_days] } }
+        - { name: date_from, in: query, required: false, schema: { type: string, format: date } }
+        - { name: date_to, in: query, required: false, schema: { type: string, format: date } }
+        - { name: sort, in: query, required: false, schema: { type: string, enum: [newest, oldest, negative_first], default: newest } }
+      responses:
+        '200':
+          description: Export file (attachment).
+          content:
+            text/csv: { schema: { type: string } }
+            application/json: { schema: { type: array, items: { type: object } } }
+            application/pdf: { schema: { type: string, format: binary } }
+        '400': { $ref: '#/components/responses/Problem' }
+  /api/analysis/analyze/pending:
+    get:
+      tags: [analysis]
+      operationId: analyzePending
+      summary: Manual flow step 1 — fetch (do not analyse) new/unanalysed conversations
+      description: >-
+        Returns the count of eligible, not-yet-analysed conversations for the selected region
+        (or all regions), a per-region breakdown, and brief details for a sample. Does not start
+        analysis. Chat-DB source only; other sources return count 0.
+      parameters:
+        - { name: region, in: query, required: false, schema: { type: string }, description: Region label (e.g. us/eu/uk); omit for all regions }
+      responses:
+        '200': { description: Pending summary., content: { application/json: { schema: { $ref: '#/components/schemas/PendingAnalysis' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+  /api/analysis/analyze/sweep:
+    post:
+      tags: [analysis]
+      operationId: analyzeSweep
+      summary: Manual flow step 2 — start background analysis of not-yet-analysed conversations
+      description: >-
+        Enqueues eligible, not-yet-analysed conversations for the selected region (or all) and
+        returns immediately (deduped; poll GET /api/analysis/queue for progress). Chat-DB source only.
+      parameters:
+        - { name: region, in: query, required: false, schema: { type: string }, description: Region label; omit for all regions }
+      responses:
+        '202': { description: Sweep started or already running., content: { application/json: { schema: { $ref: '#/components/schemas/SweepStatus' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
 components:
   responses:
     Problem:
@@ -266,6 +327,33 @@ components:
         failed: { type: integer }
         skipped: { type: integer }
         unanalysed: { type: integer }
+    PendingAnalysis:
+      type: object
+      required: [count, ids, by_region, items]
+      properties:
+        count: { type: integer, description: Total new/unanalysed conversations in scope }
+        ids: { type: array, items: { type: string }, description: Conversation ids (capped) }
+        by_region: { type: object, additionalProperties: { type: integer }, description: Pending count per region }
+        items:
+          type: array
+          description: Brief details for a sample of pending conversations
+          items:
+            type: object
+            properties:
+              conversation_id: { type: string }
+              region: { type: [string, 'null'] }
+              tenant_name: { type: [string, 'null'] }
+              title: { type: [string, 'null'] }
+              last_message_at: { type: [string, 'null'] }
+        region: { type: [string, 'null'] }
+        source: { type: string }
+    SweepStatus:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [started, already_running] }
+        region: { type: [string, 'null'] }
+        source: { type: string }
     QueueItem:
       type: object
       required: [conversation_id, status, attempt, queued_at]

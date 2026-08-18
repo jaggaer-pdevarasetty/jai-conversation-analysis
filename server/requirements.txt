@@ -9,3 +9,6 @@ truststore==0.10.4
 spacy==3.8.15
 # NER model for PII redaction (also: python -m spacy download en_core_web_sm)
 https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+
+# PDF export of feedback reports (pure-Python; no system deps)
+fpdf2==2.8.3

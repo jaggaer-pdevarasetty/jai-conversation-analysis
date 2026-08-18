@@ -155,6 +155,10 @@ export interface FeedbackQuery {
   region?: string;
   scope?: string;
   query?: string;
+  tenant?: string;
+  date_range?: string;
+  date_from?: string;
+  date_to?: string;
   sort?: string;
   limit?: number;
   offset?: number;
@@ -228,6 +232,76 @@ export const fetchQueue = (limit = 25, offset = 0) => getJson<QueueStats>(`/api/
 /** Fetch the full de-identified record for one conversation (FR-4). */
 export async function fetchConversation(id: string): Promise<ConversationDetail> {
   return getJson<ConversationDetail>(`/api/analysis/conversations/${encodeURIComponent(id)}`);
+}
+
+export interface PendingItem {
+  conversation_id: string;
+  region: string | null;
+  tenant_name: string | null;
+  title: string | null;
+  last_message_at: string | null;
+}
+export interface PendingResponse {
+  count: number;
+  ids: string[];
+  by_region: Record<string, number>;
+  items: PendingItem[];
+}
+
+export type ExportFormat = "csv" | "pdf" | "json";
+export interface FeedbackExportParams {
+  format?: ExportFormat;
+  scope?: string;
+  region?: string;
+  rating?: string;
+  category?: string;
+  query?: string;
+  tenant?: string;
+  date_range?: string;
+  date_from?: string;
+  date_to?: string;
+  sort?: string;
+}
+
+/** Build the download URL for the feedback export (full detail: transcript + root cause +
+ * recommendations + cost). Passes the same filters as the feedback list so the file matches the
+ * current view. The server sends it as an attachment. */
+export function feedbackExportUrl(params: FeedbackExportParams = {}): string {
+  const url = new URL(`${API_BASE}/api/analysis/feedback/export`);
+  url.searchParams.set("format", params.format ?? "csv");
+  url.searchParams.set("scope", params.scope ?? "thumbs");
+  if (params.region) url.searchParams.set("region", params.region);
+  if (params.rating) url.searchParams.set("rating", params.rating);
+  if (params.category) url.searchParams.set("category", params.category);
+  if (params.query) url.searchParams.set("query", params.query);
+  if (params.tenant) url.searchParams.set("tenant", params.tenant);
+  if (params.date_range) url.searchParams.set("date_range", params.date_range);
+  if (params.date_from) url.searchParams.set("date_from", params.date_from);
+  if (params.date_to) url.searchParams.set("date_to", params.date_to);
+  if (params.sort && params.sort !== "newest") url.searchParams.set("sort", params.sort);
+  return url.toString();
+}
+
+/** Step 1: fetch (don't analyse) the new / unanalysed conversations for the selected region
+ * (or all regions when region is empty) — count, per-region breakdown, and brief details. */
+export async function fetchPending(region?: string): Promise<PendingResponse> {
+  const url = new URL(`${API_BASE}/api/analysis/analyze/pending`);
+  if (region) url.searchParams.set("region", region);
+  const res = await fetch(url.toString());
+  if (!res.ok) throw new Error(`Fetch pending failed: ${res.status}`);
+  const d = (await res.json()) as Partial<PendingResponse>;
+  return { count: d.count ?? 0, ids: d.ids ?? [], by_region: d.by_region ?? {}, items: d.items ?? [] };
+}
+
+/** Step 2: start the background analysis of not-yet-analysed conversations (deduped) for the
+ * selected region (or all). Returns the server status ("started" | "already_running"). */
+export async function triggerSweep(region?: string): Promise<string> {
+  const url = new URL(`${API_BASE}/api/analysis/analyze/sweep`);
+  if (region) url.searchParams.set("region", region);
+  const res = await fetch(url.toString(), { method: "POST" });
+  if (!res.ok) throw new Error(`Analyse sweep failed: ${res.status}`);
+  const data = (await res.json()) as { status?: string };
+  return data.status ?? "started";
 }
 
 /** On-demand (re)analyse one conversation now (capped server-side per day). */

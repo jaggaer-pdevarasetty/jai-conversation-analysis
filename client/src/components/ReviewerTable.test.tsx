@@ -17,7 +17,7 @@ function response(params: AnalysisQuery = {}): ListResponse {
         ? "66666666-6666-4666-8666-666666666666"
         : `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
     category: "resolved",
-    recommended_next_step: "No action.",
+    recommended_next_step: index === 0 ? "No **action**." : "No action.",
     confidence: "medium",
     status: "analysed",
     overridden: false,
@@ -77,6 +77,8 @@ describe("ReviewerTable", () => {
     expect(await screen.findByRole("table", { name: "Analysed conversations" })).toBeInTheDocument();
     expect(await screen.findByText("11111111-1111-4111-8111-111111111111")).toBeInTheDocument();
     expect(screen.getByLabelText("Search conversations")).toBeInTheDocument();
+    expect(screen.getByText("action").tagName).toBe("STRONG");
+    expect(screen.queryByText(/\*\*action\*\*/)).not.toBeInTheDocument();
     expect(screen.queryByText(/tenant/i)).not.toBeInTheDocument();
   });
 
