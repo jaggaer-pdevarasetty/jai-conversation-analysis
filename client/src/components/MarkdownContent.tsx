@@ -55,6 +55,10 @@ function isTableSeparator(cells: string[] | null): boolean {
   return Boolean(cells?.length && cells.every((cell) => /^:?-{3,}:?$/.test(cell)));
 }
 
+function tableInline(text: string, prefix: string): ReactNode[] {
+  return inline(text.replace(/<a\b[^>]*>(.*?)<\/a>/gi, "$1"), prefix);
+}
+
 function blocks(markdown: string): ReactNode[] {
   const lines = markdown.replace(/\r\n/g, "\n").split("\n");
   const nodes: ReactNode[] = [];
@@ -87,14 +91,17 @@ function blocks(markdown: string): ReactNode[] {
       const rows: string[][] = [];
       while (i < lines.length) {
         const cells = tableCells(lines[i]);
-        if (!cells || cells.length !== header.length) break;
+        if (!cells) break;
         rows.push(cells);
         i += 1;
       }
+      const columns = Math.max(header.length, ...rows.map((row) => row.length));
+      const normalizedHeader = [...header, ...Array(columns - header.length).fill("")];
+      const normalizedRows = rows.map((row) => [...row, ...Array(columns - row.length).fill("")]);
       nodes.push(
         <table key={`block-${i}`}>
-          <thead><tr>{header.map((cell, column) => <th key={`header-${column}`}>{inline(cell, `header-${i}-${column}`)}</th>)}</tr></thead>
-          <tbody>{rows.map((row, rowIndex) => <tr key={`row-${rowIndex}`}>{row.map((cell, column) => <td key={`cell-${rowIndex}-${column}`}>{inline(cell, `cell-${i}-${rowIndex}-${column}`)}</td>)}</tr>)}</tbody>
+          <thead><tr>{normalizedHeader.map((cell, column) => <th key={`header-${column}`}>{tableInline(cell, `header-${i}-${column}`)}</th>)}</tr></thead>
+          <tbody>{normalizedRows.map((row, rowIndex) => <tr key={`row-${rowIndex}`}>{row.map((cell, column) => <td key={`cell-${rowIndex}-${column}`}>{tableInline(cell, `cell-${i}-${rowIndex}-${column}`)}</td>)}</tr>)}</tbody>
         </table>,
       );
       continue;
