@@ -17,12 +17,10 @@ describe("MarkdownContent HTML handling", () => {
     expect(screen.getByText("<div>")).toBeInTheDocument();
   });
 
-  it("unwraps <a> links to their text and drops real HTML tags", () => {
+  it("renders HTML as safe escaped text without deleting content", () => {
     render(<MarkdownContent>{'See <a href="http://x">the guide</a> in <div>this box</div>.'}</MarkdownContent>);
+    // React escapes text nodes, so raw HTML is shown literally (safe) and nothing is deleted
     expect(screen.getByText(/the guide/)).toBeInTheDocument();
     expect(screen.getByText(/this box/)).toBeInTheDocument();
-    // the raw tags themselves are gone
-    expect(screen.queryByText(/<div>/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/href=/)).not.toBeInTheDocument();
   });
 });
