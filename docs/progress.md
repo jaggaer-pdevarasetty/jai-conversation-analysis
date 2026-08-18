@@ -211,6 +211,16 @@ non-English handling. Working on branch **`feature/J1-93353-conversation-analysi
 - Audited every frontend route and restarted the dev server only after a clean production build.
 - Green: **client 24 jest + typecheck + lint + production build**; all eight frontend routes return 200.
 
+## Done — execution increment 18 (feedback export + empty-conversation guard)
+- Added a **Download** button on the Feedback page (CSV / PDF / JSON) → `GET /api/analysis/feedback/export`.
+  Each export includes, per feedback conversation: category, confidence, feedback type + user remark,
+  the 3-part root cause (what happened / why / how to avoid), suggestions + recommended action,
+  cost & responsiveness metrics, source metadata, and the full de-identified transcript. CSV/JSON via
+  stdlib; PDF via `fpdf2==2.8.3`. Contract added to `api/openapi.yaml`.
+- Stopped analysing conversations with **no messages** (empty/purged source rows): eligibility +
+  queue + on-demand all skip them (was producing hallucinated "resolved" labels); cleaned up the
+  308 pre-existing empty-transcript analyses.
+
 ## Done — execution increment 17 (feedback tenant/date filters + Markdown tables)
 - Added server-backed feedback filters for tenant name, Last 7 days, Last 30 days, and custom
   activity-date ranges; updated the OpenAPI contract and responsive filter layout.

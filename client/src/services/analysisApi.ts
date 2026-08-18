@@ -248,6 +248,27 @@ export interface PendingResponse {
   items: PendingItem[];
 }
 
+export type ExportFormat = "csv" | "pdf" | "json";
+export interface FeedbackExportParams {
+  format?: ExportFormat;
+  scope?: string;
+  region?: string;
+  rating?: string;
+  category?: string;
+}
+
+/** Build the download URL for the feedback export (full detail: transcript + root cause +
+ * recommendations + cost, all rows in scope). The server sends it as an attachment. */
+export function feedbackExportUrl(params: FeedbackExportParams = {}): string {
+  const url = new URL(`${API_BASE}/api/analysis/feedback/export`);
+  url.searchParams.set("format", params.format ?? "csv");
+  url.searchParams.set("scope", params.scope ?? "thumbs");
+  if (params.region) url.searchParams.set("region", params.region);
+  if (params.rating) url.searchParams.set("rating", params.rating);
+  if (params.category) url.searchParams.set("category", params.category);
+  return url.toString();
+}
+
 /** Step 1: fetch (don't analyse) the new / unanalysed conversations for the selected region
  * (or all regions when region is empty) — count, per-region breakdown, and brief details. */
 export async function fetchPending(region?: string): Promise<PendingResponse> {

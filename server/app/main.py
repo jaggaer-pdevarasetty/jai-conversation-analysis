@@ -10,7 +10,7 @@ import threading
 from dataclasses import asdict
 from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -492,6 +492,35 @@ def feedback_conversations(
         "limit": limit,
         "offset": offset,
     }
+
+
+@api.get("/feedback/export")
+def feedback_export(
+    format: str = Query(default="csv", pattern="^(csv|json|pdf)$"),
+    scope: str = Query(default="all", pattern="^(thumbs|outcomes|all)$"),
+    region: str | None = Query(default=None),
+    rating: str | None = Query(default=None, pattern="^(positive|negative)$"),
+    category: str | None = Query(default=None),
+):
+    """Download ALL feedback conversations in scope (no pagination) with full detail — category,
+    confidence, feedback + user remark, 3-part root cause, suggestions + recommended action, cost
+    & responsiveness metrics, and the full de-identified transcript — as CSV, JSON, or PDF."""
+    if (bad := _bad_region(region)) is not None:
+        return bad
+    if category is not None and category not in CATEGORIES:
+        return problem_response(400, "Invalid category", f"Unknown category: {category}")
+    from . import export
+
+    rows = export.collect_rows(store, scope=scope, region=region, rating=rating, category=category)
+    data, media = export.render(rows, format)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    ext = {"json": "json", "pdf": "pdf"}.get(format, "csv")
+    filename = f"feedback-{scope}-{region or 'all'}-{stamp}.{ext}"
+    return Response(
+        content=data,
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @api.post("/conversations/{conversation_id}/analyze")

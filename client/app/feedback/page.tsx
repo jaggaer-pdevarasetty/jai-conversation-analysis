@@ -34,6 +34,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CATEGORIES, fetchFeedback, type FeedbackItem, type FeedbackListResponse } from "../../src/services/analysisApi";
 import { CATEGORY_META, CategoryChip } from "../../src/components/CategoryChip";
+import { DownloadFeedbackButton } from "../../src/components/DownloadFeedbackButton";
 import { MarkdownContent } from "../../src/components/MarkdownContent";
 import { useRegion } from "../../src/components/RegionContext";
 import { StatCard } from "../../src/components/StatCard";
@@ -156,7 +157,10 @@ export default function FeedbackPage() {
             Explicit thumbs ratings connected to conversation context, root-cause analysis, remediation guidance, and operational telemetry.
           </Typography>
         </Box>
-        <Chip icon={<ChatBubbleOutlineRoundedIcon />} label="Explicit feedback only" variant="outlined" sx={{ bgcolor: "#FFFFFF" }} />
+        <Stack direction="row" spacing={1.5} alignItems="center">
+          <Chip icon={<ChatBubbleOutlineRoundedIcon />} label="Explicit feedback only" variant="outlined" sx={{ bgcolor: "#FFFFFF" }} />
+          <DownloadFeedbackButton region={region} scope="thumbs" rating={rating} category={category} />
+        </Stack>
       </Box>
 
       {negative > 0 && (

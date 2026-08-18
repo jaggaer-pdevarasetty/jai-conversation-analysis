@@ -102,6 +102,30 @@ paths:
       summary: Trigger an analysis run (scheduler / reviewer)
       responses:
         '200': { description: Run summary., content: { application/json: { schema: { $ref: '#/components/schemas/RunSummary' } } } }
+  /api/analysis/feedback/export:
+    get:
+      tags: [analysis]
+      operationId: feedbackExport
+      summary: Download feedback conversations (full detail) as CSV, JSON, or PDF
+      description: >-
+        Exports ALL feedback conversations in scope (no pagination) with full detail: category,
+        confidence, feedback type + user remark, the 3-part root-cause analysis (what happened /
+        why / how to avoid), suggestions + recommended action, cost & responsiveness metrics, and
+        the full de-identified transcript. Returned as a file attachment.
+      parameters:
+        - { name: format, in: query, required: false, schema: { type: string, enum: [csv, json, pdf], default: csv } }
+        - { name: scope, in: query, required: false, schema: { type: string, enum: [thumbs, outcomes, all], default: all } }
+        - { name: region, in: query, required: false, schema: { type: string } }
+        - { name: rating, in: query, required: false, schema: { type: string, enum: [positive, negative] } }
+        - { name: category, in: query, required: false, schema: { type: string } }
+      responses:
+        '200':
+          description: Export file (attachment).
+          content:
+            text/csv: { schema: { type: string } }
+            application/json: { schema: { type: array, items: { type: object } } }
+            application/pdf: { schema: { type: string, format: binary } }
+        '400': { $ref: '#/components/responses/Problem' }
   /api/analysis/analyze/pending:
     get:
       tags: [analysis]
