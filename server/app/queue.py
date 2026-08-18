@@ -137,8 +137,11 @@ class AnalysisQueue:
             return
 
         found = {c.id: c for c in convs}
+        # Only analyse conversations that actually have a transcript — a message-less
+        # conversation has nothing to classify and would otherwise get a hallucinated label.
+        analysable = [c for c in found.values() if c.messages]
         try:
-            records = {r.conversation_id: r for r in self._analyze(list(found.values()), f"q_{now}", now)}
+            records = {r.conversation_id: r for r in self._analyze(analysable, f"q_{now}", now)}
         except Exception:  # analyser hard-failed for this batch
             records = {}
 
@@ -148,6 +151,9 @@ class AnalysisQueue:
                 continue
             conv = found.get(cid)
             if conv is None:  # id no longer exists in the source → don't retry forever
+                self._finish(cid)
+                continue
+            if not conv.messages:  # no transcript → skip (don't analyse, don't retry forever)
                 self._finish(cid)
                 continue
             rec = records.get(cid)

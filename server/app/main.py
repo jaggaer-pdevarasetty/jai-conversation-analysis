@@ -514,6 +514,8 @@ def analyze_conversation(conversation_id: str):
         return problem_response(503, "Chat DB unavailable", type(exc).__name__)
     if conv is None:
         return problem_response(404, "Not found", f"No source conversation {conversation_id}")
+    if not conv.messages:  # empty conversation → nothing to analyse (avoid a hallucinated label)
+        return problem_response(422, "No transcript", "This conversation has no messages to analyse.")
 
     now = datetime.now(timezone.utc)
     records = make_batch_analyzer()([conv], f"ondemand_{uuid.uuid4().hex[:8]}", now.isoformat())

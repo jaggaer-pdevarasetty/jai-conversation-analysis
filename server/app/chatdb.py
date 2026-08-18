@@ -133,16 +133,21 @@ def _eligible_in_region(region: RegionConfig, engine, limit: int | None) -> list
     try:
         with eng.connect() as c:
             if _platform_layout(c, sch):
+                # Only threads that actually have messages — a message-less thread has no
+                # transcript to analyse and would otherwise be labelled from an empty prompt.
                 sql = (
                     f"select id from \"{sch}\".threads "
                     f"where updated_at < now() - interval '5 minutes' "
+                    f"and exists (select 1 from \"{sch}\".thread_messages tm where tm.thread_id = threads.id) "
                     f"order by updated_at desc"
                 )
             else:
+                # Skip conversations with no rows in `messages` (empty/purged) — nothing to analyse.
                 sql = (
                     f"select id from \"{sch}\".conversations "
                     f"where is_deleted = false "
                     f"and (last_message_at is null or last_message_at < now() - interval '5 minutes') "
+                    f"and exists (select 1 from \"{sch}\".messages m where m.conversation_id = conversations.id) "
                     f"order by last_message_at desc nulls last"
                 )
             if limit:
