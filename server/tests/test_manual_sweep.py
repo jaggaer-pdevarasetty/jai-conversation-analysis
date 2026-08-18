@@ -29,8 +29,8 @@ def test_trigger_sweep_runs_once_and_dedupes(monkeypatch):
     monkeypatch.setattr(main_module, "_sweep_running", False, raising=False)
     started, release, calls = threading.Event(), threading.Event(), []
 
-    def fake_sweep():
-        calls.append(1)
+    def fake_sweep(region=None):
+        calls.append(region)
         started.set()
         release.wait(timeout=2)
 
@@ -39,7 +39,7 @@ def test_trigger_sweep_runs_once_and_dedupes(monkeypatch):
     assert started.wait(timeout=2)
     assert main_module.trigger_sweep() is False       # already running → deduped, no pile-up
     release.set()
-    assert calls == [1]
+    assert calls == [None]  # ran exactly once, all-regions
 
 
 def test_no_scheduler_running():

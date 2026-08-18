@@ -234,18 +234,37 @@ export async function fetchConversation(id: string): Promise<ConversationDetail>
   return getJson<ConversationDetail>(`/api/analysis/conversations/${encodeURIComponent(id)}`);
 }
 
-/** Step 1: fetch (don't analyse) the count of new / unanalysed conversations. */
-export async function fetchPending(): Promise<{ count: number; ids: string[] }> {
-  const res = await fetch(`${API_BASE}/api/analysis/analyze/pending`);
-  if (!res.ok) throw new Error(`Fetch pending failed: ${res.status}`);
-  const data = (await res.json()) as { count?: number; ids?: string[] };
-  return { count: data.count ?? 0, ids: data.ids ?? [] };
+export interface PendingItem {
+  conversation_id: string;
+  region: string | null;
+  tenant_name: string | null;
+  title: string | null;
+  last_message_at: string | null;
+}
+export interface PendingResponse {
+  count: number;
+  ids: string[];
+  by_region: Record<string, number>;
+  items: PendingItem[];
 }
 
-/** Step 2: start the background analysis of all not-yet-analysed conversations (deduped).
- * Returns the server status ("started" | "already_running"). */
-export async function triggerSweep(): Promise<string> {
-  const res = await fetch(`${API_BASE}/api/analysis/analyze/sweep`, { method: "POST" });
+/** Step 1: fetch (don't analyse) the new / unanalysed conversations for the selected region
+ * (or all regions when region is empty) — count, per-region breakdown, and brief details. */
+export async function fetchPending(region?: string): Promise<PendingResponse> {
+  const url = new URL(`${API_BASE}/api/analysis/analyze/pending`);
+  if (region) url.searchParams.set("region", region);
+  const res = await fetch(url.toString());
+  if (!res.ok) throw new Error(`Fetch pending failed: ${res.status}`);
+  const d = (await res.json()) as Partial<PendingResponse>;
+  return { count: d.count ?? 0, ids: d.ids ?? [], by_region: d.by_region ?? {}, items: d.items ?? [] };
+}
+
+/** Step 2: start the background analysis of not-yet-analysed conversations (deduped) for the
+ * selected region (or all). Returns the server status ("started" | "already_running"). */
+export async function triggerSweep(region?: string): Promise<string> {
+  const url = new URL(`${API_BASE}/api/analysis/analyze/sweep`);
+  if (region) url.searchParams.set("region", region);
+  const res = await fetch(url.toString(), { method: "POST" });
   if (!res.ok) throw new Error(`Analyse sweep failed: ${res.status}`);
   const data = (await res.json()) as { status?: string };
   return data.status ?? "started";

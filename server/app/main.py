@@ -51,21 +51,39 @@ from .queue import AnalysisQueue  # noqa: E402
 
 analysis_queue = AnalysisQueue(store, make_batch_analyzer(), workers=settings.queue_workers)
 
-def _sweep() -> None:
-    """Enqueue every eligible, not-yet-analysed conversation (deduped by the queue)."""
-    from .chatdb import eligible_conversation_ids
+def _eligible_by_region(region: str | None = None) -> dict[str, list[str]]:
+    """{region_label: eligible ids}. One region if given, else all configured. A region that
+    errors (e.g. permission denied) is skipped so it can't block the others."""
+    from .chatdb import _eligible_in_region, configured_regions, resolve_region
 
-    analysis_queue.enqueue(eligible_conversation_ids())
+    regions = [resolve_region(region)] if region else configured_regions()
+    out: dict[str, list[str]] = {}
+    for r in regions:
+        if r is None:
+            continue
+        try:
+            out[r.label] = _eligible_in_region(r, None, None)
+        except Exception as exc:  # noqa: BLE001 - one bad region must not stop the rest
+            print(f"[warn] eligibility skipped region '{r.label}': {type(exc).__name__}", flush=True)
+            out[r.label] = []
+    return out
+
+
+def _sweep(region: str | None = None) -> None:
+    """Enqueue every eligible, not-yet-analysed conversation (deduped by the queue). Limited to
+    `region` when given, else all configured regions."""
+    ids = [cid for ids in _eligible_by_region(region).values() for cid in ids]
+    analysis_queue.enqueue(ids)
 
 
 _sweep_lock = threading.Lock()
 _sweep_running = False
 
 
-def trigger_sweep() -> bool:
-    """Manual trigger: run a full check + analyse sweep in the background (deduped; only
-    not-yet-analysed conversations are processed). Returns False if a sweep is already running,
-    so repeated button clicks don't pile up."""
+def trigger_sweep(region: str | None = None) -> bool:
+    """Manual trigger: run a check + analyse sweep in the background (deduped; only
+    not-yet-analysed conversations are processed) for `region` (or all). Returns False if a
+    sweep is already running, so repeated button clicks don't pile up."""
     global _sweep_running
     with _sweep_lock:
         if _sweep_running:
@@ -75,7 +93,7 @@ def trigger_sweep() -> bool:
     def _run() -> None:
         global _sweep_running
         try:
-            _sweep()
+            _sweep(region)
         except Exception as exc:  # noqa: BLE001 - chat DB may be unreachable; never crash
             print(f"[warn] manual sweep failed: {type(exc).__name__}", flush=True)
         finally:
@@ -618,28 +636,55 @@ def queue_stats(
 
 
 @api.get("/analyze/pending")
-def analyze_pending():
-    """Step 1 of the manual flow: FETCH (don't analyse) all eligible, not-yet-analysed
-    conversations across regions and return the count. The UI then shows a 'Start analysis'
-    button, which calls POST /analyze/sweep."""
+def analyze_pending(region: str | None = Query(default=None)):
+    """Step 1 of the manual flow: FETCH (don't analyse) the eligible, not-yet-analysed
+    conversations for the selected region (or all regions), returning the total, a per-region
+    breakdown, and brief details for a sample. The UI then shows a 'Start analysis' button."""
     if settings.source != "chatdb":
-        return {"count": 0, "ids": [], "source": settings.source}
-    from .chatdb import eligible_conversation_ids
+        return {"count": 0, "ids": [], "by_region": {}, "items": [], "region": region, "source": settings.source}
+    if (bad := _bad_region(region)) is not None:
+        return bad
+    from . import dashboard
 
     analysed = store.analysed_ids()
-    pending = [cid for cid in eligible_conversation_ids() if cid not in analysed]
-    return {"count": len(pending), "ids": pending[:1000], "source": settings.source}
+    by_ids = {lbl: [i for i in ids if i not in analysed] for lbl, ids in _eligible_by_region(region).items()}
+    by_region = {lbl: len(ids) for lbl, ids in by_ids.items()}
+    all_ids = [i for ids in by_ids.values() for i in ids]
+    # Brief, privacy-aware details for a small sample (good UX; conversation_meta applies
+    # pooled-mode pseudonyms when configured).
+    sample = all_ids[:15]
+    meta = dashboard.conversation_meta(sample, region=region) if sample else {}
+    items = [
+        {
+            "conversation_id": cid,
+            "region": meta.get(cid, {}).get("region"),
+            "tenant_name": meta.get(cid, {}).get("tenant_name"),
+            "title": meta.get(cid, {}).get("title"),
+            "last_message_at": meta.get(cid, {}).get("last_message_at"),
+        }
+        for cid in sample
+    ]
+    return {
+        "count": len(all_ids),
+        "ids": all_ids[:1000],
+        "by_region": by_region,
+        "items": items,
+        "region": region,
+        "source": settings.source,
+    }
 
 
 @api.post("/analyze/sweep", status_code=202)
-def analyze_sweep():
-    """Step 2 of the manual flow: check the chat DB and analyse every not-yet-analysed
-    conversation (deduped; already-analysed ones are skipped). Runs in the background — poll
-    GET /queue for progress. Returns 'already_running' if a sweep is still in flight."""
+def analyze_sweep(region: str | None = Query(default=None)):
+    """Step 2 of the manual flow: analyse every not-yet-analysed conversation for the selected
+    region (or all). Deduped; runs in the background — poll GET /queue for progress. Returns
+    'already_running' if a sweep is still in flight."""
     if settings.source != "chatdb":
         return problem_response(400, "Not available", "Manual analysis applies to the chat DB source only.")
-    started = trigger_sweep()
-    return {"status": "started" if started else "already_running", "source": settings.source}
+    if (bad := _bad_region(region)) is not None:
+        return bad
+    started = trigger_sweep(region)
+    return {"status": "started" if started else "already_running", "region": region, "source": settings.source}
 
 
 @api.get("/stats")
