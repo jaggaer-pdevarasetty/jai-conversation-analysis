@@ -21,7 +21,11 @@ describe("AnalyzeNowButton (two-step, region-aware)", () => {
       count: 3,
       ids: ["a", "b", "c"],
       by_region: { us: 2, eu: 1 },
-      items: [{ conversation_id: "a1b2c3d4", region: "us", tenant_name: "ShopBlue", title: "Approvals", last_message_at: null }],
+      items: [
+        { conversation_id: "a", region: "us", tenant_name: "ShopBlue", title: "Approvals", last_message_at: null },
+        { conversation_id: "b", region: "us", tenant_name: "ShopBlue", title: "Invoices", last_message_at: null },
+        { conversation_id: "c", region: "eu", tenant_name: "Hitachi", title: "Suppliers", last_message_at: null },
+      ],
     });
     mockTrigger.mockResolvedValue("started");
     render(<AnalyzeNowButton />);
@@ -31,6 +35,10 @@ describe("AnalyzeNowButton (two-step, region-aware)", () => {
     // fetched: count + Start button appear (Start only shows after fetching)
     expect(await screen.findByText(/new \/ unanalyzed conversation/i)).toBeInTheDocument();
     expect(screen.getByText("US: 2")).toBeInTheDocument(); // per-region breakdown
+    expect(screen.getByText("Approvals")).toBeInTheDocument();
+    expect(screen.getByText("Invoices")).toBeInTheDocument();
+    expect(screen.getByText("Suppliers")).toBeInTheDocument();
+    expect(screen.queryByText(/Showing .* of/)).not.toBeInTheDocument();
     const start = await screen.findByRole("button", { name: /start analysis/i });
 
     await userEvent.click(start);

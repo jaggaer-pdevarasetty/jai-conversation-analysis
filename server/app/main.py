@@ -699,10 +699,9 @@ def analyze_pending(region: str | None = Query(default=None)):
     by_ids = {lbl: [i for i in ids if i not in analysed] for lbl, ids in _eligible_by_region(region).items()}
     by_region = {lbl: len(ids) for lbl, ids in by_ids.items()}
     all_ids = [i for ids in by_ids.values() for i in ids]
-    # Brief, privacy-aware details for a small sample (good UX; conversation_meta applies
-    # pooled-mode pseudonyms when configured).
-    sample = all_ids[:15]
-    meta = dashboard.conversation_meta(sample, region=region) if sample else {}
+    # Privacy-aware details for the scrollable list (conversation_meta applies pooled-mode
+    # pseudonyms when configured).
+    meta = dashboard.conversation_meta(all_ids, region=region) if all_ids else {}
     items = [
         {
             "conversation_id": cid,
@@ -711,11 +710,11 @@ def analyze_pending(region: str | None = Query(default=None)):
             "title": meta.get(cid, {}).get("title"),
             "last_message_at": meta.get(cid, {}).get("last_message_at"),
         }
-        for cid in sample
+        for cid in all_ids
     ]
     return {
         "count": len(all_ids),
-        "ids": all_ids[:1000],
+        "ids": all_ids,
         "by_region": by_region,
         "items": items,
         "region": region,

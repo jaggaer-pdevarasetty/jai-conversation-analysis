@@ -132,11 +132,6 @@ export function AnalyzeNowButton({
                     </List>
                   </Box>
                 )}
-                {data.count > data.items.length && (
-                  <Typography variant="caption" color="text.secondary">
-                    Showing {data.items.length} of {data.count}.
-                  </Typography>
-                )}
               </Stack>
             ) : (
               <Typography>Everything is already analyzed in {scope} — no new conversations found.</Typography>

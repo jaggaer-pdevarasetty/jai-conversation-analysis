@@ -1,6 +1,7 @@
 """Manual analysis trigger (POST /analyze/sweep) replaces the scheduled sweep."""
 
 import threading
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -23,6 +24,24 @@ def test_analyze_pending_returns_a_count():
     assert r.status_code == 200
     body = r.json()
     assert "count" in body and body["count"] == 0
+
+
+def test_analyze_pending_returns_every_conversation(monkeypatch):
+    ids = [f"c{index}" for index in range(16)]
+    monkeypatch.setattr(main_module, "settings", SimpleNamespace(source="chatdb"))
+    monkeypatch.setattr(main_module.store, "analysed_ids", lambda: set())
+    monkeypatch.setattr(main_module, "_eligible_by_region", lambda region=None: {"us": ids})
+    monkeypatch.setattr(
+        "app.dashboard.conversation_meta",
+        lambda conversation_ids, region=None: {
+            cid: {"region": "us", "title": cid, "tenant_name": "Tenant", "last_message_at": None}
+            for cid in conversation_ids
+        },
+    )
+    body = main_module.analyze_pending(region=None)
+    assert body["count"] == 16
+    assert len(body["ids"]) == 16
+    assert len(body["items"]) == 16
 
 
 def test_trigger_sweep_runs_once_and_dedupes(monkeypatch):
