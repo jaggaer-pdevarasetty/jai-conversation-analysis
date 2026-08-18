@@ -221,12 +221,22 @@ non-English handling. Working on branch **`feature/J1-93353-conversation-analysi
 - Green: **client 25 jest + typecheck + lint + production build; server 82 pytest, 3 skipped;
   OpenAPI YAML valid; read-only posture guard passed**.
 
+## Done — execution increment 18 (EU migration completed)
+- Diagnosed two EU layouts: a 19-thread platform schema and the authoritative 1,600-conversation
+  classic chat schema. Added read-only compatibility for both while keeping US/UK unchanged.
+- After classic-schema access was corrected, deleted exactly the 19 approved platform-derived rows
+  from the service-owned result store; no source/org data was modified.
+- Migrated all **1,600 non-deleted EU conversations** through the normal de-identification + Vertex
+  boundary. Final categories: 977 resolved, 544 failed-to-resolve, 16 positive feedback,
+  17 negative feedback, and 46 out-of-scope.
+- Live verification without restarting the active backend: EU source/overview/API totals all 1,600;
+  queue 0, in-flight 0, dead-letter 0, unanalysed 0; read-only posture guard passed.
+- SQL result loading now ignores obsolete extra JSON fields such as legacy `enrichment` metadata.
+
 ## Next
-1. Repopulate `analysis` from `chatdb` via Vertex + restart backend (approved) → UI shows real data.
-2. Fix `.env`: `CHAT_DB_URL` db = `jai_agentos_uit`, `CHAT_DB_SCHEMA=jai_agentos_schema_uit`, `SOURCE=chatdb`.
-3. Grow the eval gold set to 100–200 real labelled conversations (≥85% gate).
-4. Add server-side search/pagination and trend endpoints once review volume requires them.
-5. Scheduler wiring (every 4h) with rate-limit-aware batch.
+1. Grow the eval gold set to 100–200 real labelled conversations (≥85% gate).
+2. Add server-side search/pagination and trend endpoints once review volume requires them.
+3. Scheduler wiring (every 4h) with rate-limit-aware batch.
 
 ## Blockers / needs
 - **Credentials:** LangSmith read key; chat DB read-only connection details; Gemini access.

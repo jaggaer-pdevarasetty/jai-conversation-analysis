@@ -78,6 +78,14 @@ def _engine():
 
 
 _EXPECTED_TABLES = ["conversations", "messages", "feedback", "token_usage"]
+_PLATFORM_TABLES = ["threads", "thread_messages"]
+
+
+def _platform_layout(connection, schema: str) -> bool:
+    return connection.execute(
+        text("select to_regclass(:relation) is not null"),
+        {"relation": f"{schema}.threads"},
+    ).scalar_one()
 
 
 def region_labels() -> list[str]:
@@ -99,7 +107,8 @@ def check_regions() -> list[dict]:
             eng = _engine_for(r.url, r.db_name)
             try:
                 with eng.connect() as c:
-                    for t in _EXPECTED_TABLES:
+                    tables = _PLATFORM_TABLES if _platform_layout(c, sch) else _EXPECTED_TABLES
+                    for t in tables:
                         info["counts"][t] = c.execute(
                             text(f'select count(*) from "{sch}".{t}')
                         ).scalar_one()
@@ -123,12 +132,19 @@ def _eligible_in_region(region: RegionConfig, engine, limit: int | None) -> list
     eng = engine or _engine_for(region.url, region.db_name)
     try:
         with eng.connect() as c:
-            sql = (
-                f"select id from \"{sch}\".conversations "
-                f"where is_deleted = false "
-                f"and (last_message_at is null or last_message_at < now() - interval '5 minutes') "
-                f"order by last_message_at desc nulls last"
-            )
+            if _platform_layout(c, sch):
+                sql = (
+                    f"select id from \"{sch}\".threads "
+                    f"where updated_at < now() - interval '5 minutes' "
+                    f"order by updated_at desc"
+                )
+            else:
+                sql = (
+                    f"select id from \"{sch}\".conversations "
+                    f"where is_deleted = false "
+                    f"and (last_message_at is null or last_message_at < now() - interval '5 minutes') "
+                    f"order by last_message_at desc nulls last"
+                )
             if limit:
                 sql += " limit :lim"
             rows = c.execute(text(sql), {"lim": limit} if limit else {}).all()
@@ -167,6 +183,68 @@ def load_from_chatdb(
     return out
 
 
+def _load_platform_region(
+    region: RegionConfig, limit: int, engine, ids: list[str] | None = None
+) -> list[Conversation]:
+    sch = safe_schema(region.schema)
+    with engine.connect() as c:
+        if ids is not None:
+            threads = c.execute(
+                text(
+                    f'select id, tenant_id, user_id, title, created_at from "{sch}".threads '
+                    f'where id::text in :ids'
+                ).bindparams(bindparam("ids", expanding=True)),
+                {"ids": ids},
+            ).mappings().all()
+        else:
+            threads = c.execute(
+                text(
+                    f'select id, tenant_id, user_id, title, created_at from "{sch}".threads '
+                    f'order by updated_at desc limit :limit'
+                ),
+                {"limit": limit},
+            ).mappings().all()
+        thread_ids = [str(row["id"]) for row in threads]
+        if not thread_ids:
+            return []
+        messages = c.execute(
+            text(
+                f'select id, thread_id, role, content, model, tokens, latency_ms, created_at, '
+                f'row_number() over (partition by thread_id order by created_at, id) sequence_num '
+                f'from "{sch}".thread_messages where thread_id::text in :ids '
+                f'order by thread_id, created_at, id'
+            ).bindparams(bindparam("ids", expanding=True)),
+            {"ids": thread_ids},
+        ).mappings().all()
+
+    messages_by_thread: dict[str, list[Message]] = defaultdict(list)
+    for row in messages:
+        role = row["role"] if row["role"] in {"system", "user", "assistant", "live_agent"} else "assistant"
+        messages_by_thread[str(row["thread_id"])].append(
+            Message(
+                id=str(row["id"]),
+                role=role,
+                content=row["content"] or "",
+                sequence_num=int(row["sequence_num"]),
+                status="completed",
+                model=row["model"],
+                created_at=str(row["created_at"]) if row["created_at"] else "",
+            )
+        )
+    return [
+        Conversation(
+            id=str(row["id"]),
+            tenant_id=str(row["tenant_id"] or ""),
+            title=row["title"],
+            created_at=str(row["created_at"]) if row["created_at"] else "",
+            messages=messages_by_thread.get(str(row["id"]), []),
+            feedback=Feedback(),
+            region=region.label,
+        )
+        for row in threads
+    ]
+
+
 def _load_region(
     region: RegionConfig, limit: int | None = None, engine=None, ids: list[str] | None = None
 ) -> list[Conversation]:
@@ -174,6 +252,10 @@ def _load_region(
     sch = safe_schema(region.schema)
     eng = engine or _engine_for(region.url, region.db_name)
     try:
+        with eng.connect() as c:
+            platform = _platform_layout(c, sch)
+        if platform:
+            return _load_platform_region(region, limit, eng, ids)
         with eng.connect() as c:
             if ids is not None:
                 convs = c.execute(

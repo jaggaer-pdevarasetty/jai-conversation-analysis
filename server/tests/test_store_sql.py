@@ -5,6 +5,7 @@ if no Postgres is reachable (e.g. CI without a Postgres service).
 """
 
 import os
+from dataclasses import asdict
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -12,7 +13,7 @@ from sqlalchemy import create_engine, text
 from app.deidentify import deidentify
 from app.domain.analyze import analyze
 from app.fixtures import CONVERSATIONS
-from app.store_sql import SqlResultStore
+from app.store_sql import SqlResultStore, _row_to_rec
 
 # Opt-in only: set TEST_DATABASE_URL to a DISPOSABLE Postgres. If unset, these tests SKIP —
 # so pytest/pre-commit can never truncate the app's real `analysis` DB.
@@ -33,6 +34,12 @@ def store() -> SqlResultStore:
         conn.execute(text("TRUNCATE analysis, conversation, failed"))
     engine.dispose()
     return s
+
+
+def test_legacy_analysis_fields_are_ignored():
+    record = analyze(POSITIVE, "run")
+    data = asdict(record) | {"enrichment": {"legacy": True}}
+    assert _row_to_rec(data).conversation_id == record.conversation_id
 
 
 def test_persists_and_reads_back(store: SqlResultStore):
