@@ -36,6 +36,24 @@ def test_enqueue_dedupes_and_skips_already_analysed(monkeypatch):
     assert all(item["status"] == "queued" for item in stats["items"])
 
 
+def test_stats_are_scoped_by_environment():
+    store = CommonStore()
+    q = AnalysisQueue(store, _rules_batch, workers=0)  # no workers → inspect queue only
+    q.enqueue(IDS[:2], env="uit")
+    q.enqueue(IDS[2:4], env="prod")
+
+    uit = q.stats(env="uit")
+    prod = q.stats(env="prod")
+    assert uit["in_flight_or_queued"] == 2
+    assert prod["in_flight_or_queued"] == 2
+    assert {i["conversation_id"] for i in uit["items"]} == set(IDS[:2])
+    assert {i["conversation_id"] for i in prod["items"]} == set(IDS[2:4])
+    assert all(i["environment"] == "uit" for i in uit["items"])
+    assert all(i["environment"] == "prod" for i in prod["items"])
+    # the unscoped view still sees everything (admin/debug)
+    assert q.stats()["in_flight_or_queued"] == 4
+
+
 def test_worker_processes_then_never_reruns(monkeypatch):
     store = CommonStore()
     # the worker loads conversations from chatdb by id; stub it with our fixtures

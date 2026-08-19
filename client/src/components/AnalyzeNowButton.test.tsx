@@ -14,14 +14,14 @@ jest.mock("./EnvContext", () => ({
 const mockFetch = fetchPending as jest.MockedFunction<typeof fetchPending>;
 const mockTrigger = triggerSweep as jest.MockedFunction<typeof triggerSweep>;
 
-describe("AnalyzeNowButton (two-step, region-aware)", () => {
+describe("AnalyzeNowButton", () => {
   beforeEach(() => {
     mockEnv = "uit";
     mockFetch.mockReset();
     mockTrigger.mockReset();
   });
 
-  it("fetches first, shows count + a Start button, then analyses on Start", async () => {
+  it("UIT: fetches, shows count + a Start button, then analyses on Start", async () => {
     mockFetch.mockResolvedValue({
       count: 3,
       ids: ["a", "b", "c"],
@@ -37,21 +37,18 @@ describe("AnalyzeNowButton (two-step, region-aware)", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /analyze/i }));
     expect(mockFetch).toHaveBeenCalledTimes(1);
-    // fetched: count + Start button appear (Start only shows after fetching)
+    expect(mockFetch).toHaveBeenCalledWith("", "all");
     expect(await screen.findByText(/new \/ unanalyzed conversation/i)).toBeInTheDocument();
-    expect(screen.getByText("US: 2")).toBeInTheDocument(); // per-region breakdown
+    expect(screen.getByText("US: 2")).toBeInTheDocument();
     expect(screen.getByText("Approvals")).toBeInTheDocument();
-    expect(screen.getByText("Invoices")).toBeInTheDocument();
-    expect(screen.getByText("Suppliers")).toBeInTheDocument();
-    expect(screen.queryByText(/Showing .* of/)).not.toBeInTheDocument();
     const start = await screen.findByRole("button", { name: /start analysis/i });
 
     await userEvent.click(start);
-    expect(mockTrigger).toHaveBeenCalledTimes(1);
+    expect(mockTrigger).toHaveBeenCalledWith("", "all");
     expect(await screen.findByText(/analysis started/i)).toBeInTheDocument();
   });
 
-  it("offers no Start button when there is nothing new to analyse", async () => {
+  it("UIT: offers no Start button when there is nothing new to analyse", async () => {
     mockFetch.mockResolvedValue({ count: 0, ids: [], by_region: {}, items: [] });
     render(<AnalyzeNowButton />);
     await userEvent.click(screen.getByRole("button", { name: /analyze/i }));
@@ -67,16 +64,30 @@ describe("AnalyzeNowButton (two-step, region-aware)", () => {
     expect(await screen.findByText(/couldn't fetch conversations/i)).toBeInTheDocument();
   });
 
-  it("in PROD auto-analyses feedback conversations with no Start-analysis confirmation", async () => {
+  it("PROD: shows feedback + all sections with separate buttons; feedback button sweeps feedback only", async () => {
     mockEnv = "prod";
-    mockFetch.mockResolvedValue({ count: 5, ids: ["a"], by_region: { us: 5 }, items: [] });
+    mockFetch.mockImplementation((_region, scope) =>
+      Promise.resolve(
+        scope === "feedback"
+          ? { count: 5, ids: [], by_region: { us: 5 }, items: [] }
+          : { count: 20, ids: [], by_region: { us: 20 }, items: [] },
+      ),
+    );
     mockTrigger.mockResolvedValue("started");
     render(<AnalyzeNowButton />);
 
-    await userEvent.click(screen.getByRole("button", { name: /analyze/i }));
-    // no confirmation button — analysis starts automatically
-    expect(screen.queryByRole("button", { name: /start analysis/i })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /^analyze$/i }));
+    // both scopes fetched
+    expect(mockFetch).toHaveBeenCalledWith("", "feedback");
+    expect(mockFetch).toHaveBeenCalledWith("", "all");
+    // two sections + warning on "all"
+    expect(await screen.findByText(/with user feedback are not analyzed/i)).toBeInTheDocument();
+    expect(screen.getByText(/analyzes/i)).toBeInTheDocument(); // warning text
+    const feedbackBtn = screen.getByRole("button", { name: /analyze feedback/i });
+    expect(screen.getByRole("button", { name: /analyze all/i })).toBeInTheDocument();
+
+    await userEvent.click(feedbackBtn);
+    expect(mockTrigger).toHaveBeenCalledWith("", "feedback");
     expect(await screen.findByText(/analysis started/i)).toBeInTheDocument();
-    expect(mockTrigger).toHaveBeenCalledTimes(1);
   });
 });

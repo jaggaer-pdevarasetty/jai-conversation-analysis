@@ -216,10 +216,12 @@ non-English handling. Working on branch **`feature/J1-93353-conversation-analysi
   the app bar (remember-last) switches the whole app; every request carries `?env=`.
 - **Strict isolation**: results store now keyed by `(conversation_id, environment)` with an
   idempotent startup migration (existing rows → uit); every read/write/count filters by env.
-- **PROD posture**: browse everything; **feedback conversations are auto-analysed** (existing ones
-  via a startup-event background sweep, new ones on the one-click Analyze — no confirmation);
-  **non-feedback conversations only on the per-conversation Analyze button**. Bulk is feedback-only;
-  general lazy-analyse stays UIT-only. All UIT guards carry over.
+- **PROD posture** (manual, no auto/boot sweep): the **Analyze** dialog splits into two scopes —
+  **Analyze feedback** (`scope=feedback`) and **Analyze all** (`scope=all`, warned it includes
+  feedback); conversations can also be analysed one at a time. UIT keeps the single-list dialog.
+  Existing PROD feedback was seeded once; future PROD analysis is user-triggered. lazy-analyse UIT-only.
+- **Separate queues per env**: `/queue?env=` is filtered by environment (items + counts), so the UIT
+  live queue never shows PROD work and vice-versa (one queue instance, `(env, id)` items).
 - Config via `PROD_*` vars (currently pointed at UIT as a dummy for end-to-end testing until real
   PROD credentials exist). Verified live: browse/filters/regions per env, feedback-only pending
   (PROD 358 vs UIT 17), analyze one PROD conversation → stored PROD-only (UIT untouched).

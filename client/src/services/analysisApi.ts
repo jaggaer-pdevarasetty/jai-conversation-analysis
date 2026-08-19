@@ -285,9 +285,10 @@ export function feedbackExportUrl(params: FeedbackExportParams = {}): string {
 
 /** Step 1: fetch (don't analyse) the new / unanalysed conversations for the selected region
  * (or all regions when region is empty) — count, per-region breakdown, and brief details. */
-export async function fetchPending(region?: string): Promise<PendingResponse> {
+export async function fetchPending(region?: string, scope?: string): Promise<PendingResponse> {
   const url = new URL(`${API_BASE}/api/analysis/analyze/pending`);
   if (region) url.searchParams.set("region", region);
+  if (scope) url.searchParams.set("scope", scope);
   const res = await fetch(withEnv(url).toString());
   if (!res.ok) throw new Error(`Fetch pending failed: ${res.status}`);
   const d = (await res.json()) as Partial<PendingResponse>;
@@ -295,10 +296,12 @@ export async function fetchPending(region?: string): Promise<PendingResponse> {
 }
 
 /** Step 2: start the background analysis of not-yet-analysed conversations (deduped) for the
- * selected region (or all). Returns the server status ("started" | "already_running"). */
-export async function triggerSweep(region?: string): Promise<string> {
+ * selected region (or all). `scope=feedback` restricts to feedback conversations; `scope=all`
+ * analyses every conversation. Returns the server status ("started" | "already_running"). */
+export async function triggerSweep(region?: string, scope?: string): Promise<string> {
   const url = new URL(`${API_BASE}/api/analysis/analyze/sweep`);
   if (region) url.searchParams.set("region", region);
+  if (scope) url.searchParams.set("scope", scope);
   const res = await fetch(withEnv(url).toString(), { method: "POST" });
   if (!res.ok) throw new Error(`Analyse sweep failed: ${res.status}`);
   const data = (await res.json()) as { status?: string };

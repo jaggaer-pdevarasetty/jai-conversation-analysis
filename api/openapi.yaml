@@ -119,8 +119,9 @@ paths:
     get:
       tags: [analysis]
       operationId: analysisQueue
-      summary: Live queue health and queued/in-flight conversation IDs
+      summary: Live queue health and queued/in-flight conversation IDs (scoped to one environment)
       parameters:
+        - { name: env, in: query, required: false, schema: { type: string, enum: [uit, prod] }, description: Environment (default uit) — the queue view is per-environment }
         - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 25 } }
         - { name: offset, in: query, required: false, schema: { type: integer, minimum: 0, default: 0 } }
       responses:
@@ -175,6 +176,7 @@ paths:
       parameters:
         - { name: region, in: query, required: false, schema: { type: string }, description: Region label (e.g. us/eu/uk); omit for all regions }
         - { name: env, in: query, required: false, schema: { type: string, enum: [uit, prod] }, description: Environment (default uit) }
+        - { name: scope, in: query, required: false, schema: { type: string, enum: [all, feedback], default: all }, description: 'feedback = only conversations with user feedback; all = every conversation (PROD shows both)' }
       responses:
         '200': { description: Pending summary., content: { application/json: { schema: { $ref: '#/components/schemas/PendingAnalysis' } } } }
         '400': { $ref: '#/components/responses/Problem' }
@@ -189,6 +191,7 @@ paths:
       parameters:
         - { name: region, in: query, required: false, schema: { type: string }, description: Region label; omit for all regions }
         - { name: env, in: query, required: false, schema: { type: string, enum: [uit, prod] }, description: Environment (default uit) }
+        - { name: scope, in: query, required: false, schema: { type: string, enum: [all, feedback], default: all }, description: 'feedback = only feedback conversations; all = every conversation' }
       responses:
         '202': { description: Sweep started or already running., content: { application/json: { schema: { $ref: '#/components/schemas/SweepStatus' } } } }
         '400': { $ref: '#/components/responses/Problem' }

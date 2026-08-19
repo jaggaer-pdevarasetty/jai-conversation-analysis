@@ -83,23 +83,31 @@ class AnalysisQueue:
             self._store.mark_analyzing(accepted, env)
         return accepted
 
-    def stats(self, limit: int = 100, offset: int = 0) -> dict:
+    def stats(self, limit: int = 100, offset: int = 0, env: str | None = None) -> dict:
+        """Queue health. Scoped to one environment when `env` is given — UIT and PROD are shown
+        as fully separate queues even though one queue instance backs both (ADR-0020)."""
+        def match(item: Item) -> bool:
+            return env is None or item[0] == env
+
         with self._lock:
+            queued_items = [it for it in self._queued if match(it)]
             items = [
                 {
                     "conversation_id": cid,
-                    "environment": env,
-                    "status": "retrying" if (env, cid) in self._retrying else "analysing" if (env, cid) in self._in_flight else "queued",
-                    "attempt": self._attempts.get((env, cid), 0) + 1,
-                    "queued_at": self._queued_at[(env, cid)],
+                    "environment": e,
+                    "status": "retrying" if (e, cid) in self._retrying else "analysing" if (e, cid) in self._in_flight else "queued",
+                    "attempt": self._attempts.get((e, cid), 0) + 1,
+                    "queued_at": self._queued_at[(e, cid)],
                 }
-                for (env, cid) in sorted(self._queued, key=lambda it: self._queued_at[it])
+                for (e, cid) in sorted(queued_items, key=lambda it: self._queued_at[it])
             ]
+            in_flight = sum(1 for it in self._in_flight if match(it))
+            in_flight_or_queued = len(queued_items)
             return {
-                "queued": self._q.qsize(),
-                "in_flight": len(self._in_flight),
-                "in_flight_or_queued": len(self._queued),
-                "dead_letter": len(self._dead),
+                "queued": in_flight_or_queued - in_flight,  # per-env (raw Queue size spans envs)
+                "in_flight": in_flight,
+                "in_flight_or_queued": in_flight_or_queued,
+                "dead_letter": sum(1 for it in self._dead if match(it)),
                 "capacity": self._q.maxsize,
                 "workers": len(self._workers),
                 "started": self._started,

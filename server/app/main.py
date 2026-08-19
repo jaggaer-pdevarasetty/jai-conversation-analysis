@@ -51,13 +51,14 @@ from .queue import AnalysisQueue  # noqa: E402
 
 analysis_queue = AnalysisQueue(store, make_batch_analyzer(), workers=settings.queue_workers)
 
-def _eligible_by_region(region: str | None = None, env: str = "uit") -> dict[str, list[str]]:
+def _eligible_by_region(
+    region: str | None = None, env: str = "uit", feedback_only: bool = False
+) -> dict[str, list[str]]:
     """{region_label: eligible ids} for an environment. One region if given, else all configured.
-    PROD is restricted to conversations with user feedback (too many to bulk-analyse). A region
-    that errors (e.g. permission denied) is skipped so it can't block the others."""
+    When `feedback_only`, restrict to conversations that have user feedback (PROD 'feedback'
+    scope). A region that errors (e.g. permission denied) is skipped so it can't block others."""
     from .chatdb import _eligible_in_region, configured_regions, resolve_region
 
-    feedback_only = env == "prod"
     regions = [resolve_region(region, env)] if region else configured_regions(env)
     out: dict[str, list[str]] = {}
     for r in regions:
@@ -71,38 +72,38 @@ def _eligible_by_region(region: str | None = None, env: str = "uit") -> dict[str
     return out
 
 
-def _sweep(region: str | None = None, env: str = "uit") -> None:
+def _sweep(region: str | None = None, env: str = "uit", feedback_only: bool = False) -> None:
     """Enqueue every eligible, not-yet-analysed conversation for an environment (deduped by the
-    queue). Pre-filters with a single analysed_ids() query so we don't fire one is_analysed()
-    round-trip per eligible id on every trigger."""
+    queue). `feedback_only` restricts to conversations with user feedback. Pre-filters with a
+    single analysed_ids() query so we don't fire one is_analysed() round-trip per id."""
     analysed = store.analysed_ids(env)
-    ids = [cid for ids in _eligible_by_region(region, env).values() for cid in ids if cid not in analysed]
+    eligible = _eligible_by_region(region, env, feedback_only)
+    ids = [cid for ids in eligible.values() for cid in ids if cid not in analysed]
     analysis_queue.enqueue(ids, env)
 
 
 _sweep_lock = threading.Lock()
-_sweep_running = False
+_sweeps_running: set[str] = set()  # per-environment → UIT and PROD sweeps are independent
 
 
-def trigger_sweep(region: str | None = None, env: str = "uit") -> bool:
+def trigger_sweep(region: str | None = None, env: str = "uit", feedback_only: bool = False) -> bool:
     """Manual trigger: run a check + analyse sweep in the background (deduped; only
-    not-yet-analysed conversations are processed) for `region` (or all) in `env`. Returns False
-    if a sweep is already running, so repeated button clicks don't pile up."""
-    global _sweep_running
+    not-yet-analysed conversations are processed) for `region` (or all) in `env`. `feedback_only`
+    restricts to feedback conversations. Dedup is per-environment: a running UIT sweep never blocks
+    a PROD sweep (and vice-versa). Returns False if a sweep is already running for THIS env."""
     with _sweep_lock:
-        if _sweep_running:
+        if env in _sweeps_running:
             return False
-        _sweep_running = True
+        _sweeps_running.add(env)
 
     def _run() -> None:
-        global _sweep_running
         try:
-            _sweep(region, env)
+            _sweep(region, env, feedback_only)
         except Exception as exc:  # noqa: BLE001 - chat DB may be unreachable; never crash
             print(f"[warn] manual sweep failed: {type(exc).__name__}", flush=True)
         finally:
             with _sweep_lock:
-                _sweep_running = False
+                _sweeps_running.discard(env)
 
     threading.Thread(target=_run, name="manual-sweep", daemon=True).start()
     return True
@@ -122,9 +123,8 @@ if settings.source == "chatdb":
     if not any(h["ok"] for h in region_health):
         print("[startup][warn] NO region is readable — dashboards will be empty until fixed.", flush=True)
 
-    # UIT: manual — analysis runs only when triggered from the UI (no boot/scheduled sweep).
-    # PROD feedback conversations are auto-analysed by a FastAPI startup event (below) so the
-    # background sweep spawns reliably after the app is up (not during module import).
+    # MANUAL for both environments: analysis runs only when triggered from the UI
+    # (POST /analyze/sweep, per-conversation analyse). No boot sweep, no scheduled cadence.
     analysis_queue.start()
     latest_run = run_analysis(store, [], analyze_batch=make_batch_analyzer())  # empty summary
 else:
@@ -149,8 +149,9 @@ def _env(env: str | None) -> str:
 
 
 def _bad_region(region: str | None, env: str = "uit"):
-    """Reject an unknown region label for the environment (strict — no cross-region leakage)."""
-    if region is None:
+    """Reject an unknown region label for the environment (strict — no cross-region leakage).
+    An empty/None region means 'all regions' and is always valid."""
+    if not region:
         return None
     from .chatdb import region_labels
 
@@ -723,33 +724,41 @@ def dashboard_user_conversations(
 
 @api.get("/queue")
 def queue_stats(
+    env: str | None = Query(default=None),
     limit: int = Query(default=25, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ):
-    """Queue health: depth, in-flight, dead-letter, capacity, workers."""
-    return analysis_queue.stats(limit=limit, offset=offset)
+    """Queue health for the selected environment (UIT and PROD are separate views): depth,
+    in-flight, dead-letter, capacity, workers."""
+    return analysis_queue.stats(limit=limit, offset=offset, env=_env(env))
 
 
 @api.get("/analyze/pending")
-def analyze_pending(region: str | None = Query(default=None), env: str | None = Query(default=None)):
+def analyze_pending(
+    region: str | None = Query(default=None),
+    env: str | None = Query(default=None),
+    scope: str = Query(default="all", pattern="^(all|feedback)$"),
+):
     """Step 1 of the manual flow: FETCH (don't analyse) the eligible, not-yet-analysed
     conversations for the selected region (or all regions), returning the total, a per-region
-    breakdown, and brief details for a sample. The UI then shows a 'Start analysis' button.
-    In PROD this is bounded to conversations that have user feedback."""
+    breakdown, and brief details for a sample. `scope=feedback` restricts to conversations with
+    user feedback (PROD shows feedback + all as two separate lists)."""
     env = _env(env)
     if settings.source != "chatdb":
-        return {"count": 0, "ids": [], "by_region": {}, "items": [], "region": region, "environment": env, "source": settings.source}
+        return {"count": 0, "ids": [], "by_region": {}, "items": [], "region": region, "environment": env, "scope": scope, "source": settings.source}
     if (bad := _bad_region(region, env)) is not None:
         return bad
     from . import dashboard
 
     analysed = store.analysed_ids(env)
-    by_ids = {lbl: [i for i in ids if i not in analysed] for lbl, ids in _eligible_by_region(region, env).items()}
+    eligible = _eligible_by_region(region, env, feedback_only=(scope == "feedback"))
+    by_ids = {lbl: [i for i in ids if i not in analysed] for lbl, ids in eligible.items()}
     by_region = {lbl: len(ids) for lbl, ids in by_ids.items()}
     all_ids = [i for ids in by_ids.values() for i in ids]
-    # Privacy-aware details for the scrollable list (conversation_meta applies pooled-mode
-    # pseudonyms when configured).
-    meta = dashboard.conversation_meta(all_ids, region=region, env=env) if all_ids else {}
+    # Only enrich a bounded sample for the preview list — the 'all' scope in PROD can be huge and
+    # conversation_meta joins the chat DB, so meta for every id would be slow. The count is exact.
+    sample = all_ids[:50]
+    meta = dashboard.conversation_meta(sample, region=region, env=env) if sample else {}
     items = [
         {
             "conversation_id": cid,
@@ -758,7 +767,7 @@ def analyze_pending(region: str | None = Query(default=None), env: str | None = 
             "title": meta.get(cid, {}).get("title"),
             "last_message_at": meta.get(cid, {}).get("last_message_at"),
         }
-        for cid in all_ids
+        for cid in sample
     ]
     return {
         "count": len(all_ids),
@@ -767,22 +776,27 @@ def analyze_pending(region: str | None = Query(default=None), env: str | None = 
         "items": items,
         "region": region,
         "environment": env,
+        "scope": scope,
         "source": settings.source,
     }
 
 
 @api.post("/analyze/sweep", status_code=202)
-def analyze_sweep(region: str | None = Query(default=None), env: str | None = Query(default=None)):
-    """Step 2 of the manual flow: analyse every not-yet-analysed conversation for the selected
-    region (or all) in the environment. In PROD only feedback conversations are swept. Deduped;
-    runs in the background — poll GET /queue for progress."""
+def analyze_sweep(
+    region: str | None = Query(default=None),
+    env: str | None = Query(default=None),
+    scope: str = Query(default="all", pattern="^(all|feedback)$"),
+):
+    """Step 2 of the manual flow: analyse not-yet-analysed conversations for the selected region
+    (or all) in the environment. `scope=feedback` restricts to feedback conversations; `scope=all`
+    analyses every conversation. Deduped; runs in the background — poll GET /queue for progress."""
     env = _env(env)
     if settings.source != "chatdb":
         return problem_response(400, "Not available", "Manual analysis applies to the chat DB source only.")
     if (bad := _bad_region(region, env)) is not None:
         return bad
-    started = trigger_sweep(region, env)
-    return {"status": "started" if started else "already_running", "region": region, "environment": env, "source": settings.source}
+    started = trigger_sweep(region, env, feedback_only=(scope == "feedback"))
+    return {"status": "started" if started else "already_running", "region": region, "environment": env, "scope": scope, "source": settings.source}
 
 
 @api.get("/stats")
@@ -816,12 +830,3 @@ def trigger_run():
 
 
 app.include_router(api)
-
-
-@app.on_event("startup")
-def _auto_analyse_prod_feedback() -> None:
-    """PROD: auto-analyse conversations that already have user feedback ("till now") — in the
-    background, once, without any user action. Non-feedback PROD conversations are analysed on
-    demand (per-conversation button). UIT stays fully manual."""
-    if settings.source == "chatdb" and "prod" in settings.environments():
-        trigger_sweep(env="prod")

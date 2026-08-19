@@ -11,6 +11,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   List,
   ListItem,
   ListItemText,
@@ -22,7 +23,7 @@ import { fetchPending, triggerSweep, type PendingResponse } from "../services/an
 import { useEnv } from "./EnvContext";
 import { useRegion } from "./RegionContext";
 
-type Phase = "fetching" | "fetched" | "starting" | "started" | "error";
+type Phase = "fetching" | "ready" | "starting" | "started" | "error";
 
 const EMPTY: PendingResponse = { count: 0, ids: [], by_region: {}, items: [] };
 
@@ -35,10 +36,41 @@ function ago(iso: string | null): string {
   return `${Math.round(secs / 86400)}d ago`;
 }
 
-/** Two-step manual analysis, scoped to the selected region:
- *  1. Click "Analyze" -> fetch new / unanalysed conversations (loader) -> show count,
- *     per-region breakdown, and a brief list.
- *  2. "Start analysis" appears (only after fetching, only if there's work) -> analyse (loader). */
+/** Preview of a pending set: per-region chip breakdown + a brief (sampled) list. */
+function PendingPreview({ data, showRegions }: { data: PendingResponse; showRegions: boolean }) {
+  return (
+    <Stack spacing={1}>
+      {showRegions && Object.keys(data.by_region).length > 0 && (
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+          {Object.entries(data.by_region).map(([lbl, n]) => (
+            <Chip key={lbl} size="small" variant="outlined" label={`${lbl.toUpperCase()}: ${n}`} />
+          ))}
+        </Stack>
+      )}
+      {data.items.length > 0 && (
+        <Box sx={{ maxHeight: 180, overflow: "auto", bgcolor: "action.hover", borderRadius: 1.5 }}>
+          <List dense disablePadding>
+            {data.items.map((it) => (
+              <ListItem key={it.conversation_id} divider>
+                <ListItemText
+                  primaryTypographyProps={{ noWrap: true, fontWeight: 600 }}
+                  secondaryTypographyProps={{ noWrap: true }}
+                  primary={it.title || it.tenant_name || it.conversation_id.slice(0, 8)}
+                  secondary={[it.region?.toUpperCase(), it.tenant_name, ago(it.last_message_at)].filter(Boolean).join(" · ")}
+                />
+              </ListItem>
+            ))}
+          </List>
+        </Box>
+      )}
+    </Stack>
+  );
+}
+
+/** Manual analysis, scoped to the selected region + environment.
+ *  UIT: one list of new / unanalysed conversations + a single "Start analysis" button.
+ *  PROD: two lists — feedback conversations (analyse feedback only) and all conversations
+ *  (analyse everything, with a warning that this includes the feedback ones). */
 export function AnalyzeNowButton({
   variant = "contained",
   size = "small",
@@ -50,44 +82,48 @@ export function AnalyzeNowButton({
 }) {
   const { region } = useRegion(); // "" = all regions
   const { env } = useEnv();
-  const isProd = env === "prod"; // PROD analyses feedback conversations automatically
+  const isProd = env === "prod";
   const [open, setOpen] = useState(false);
   const [phase, setPhase] = useState<Phase>("fetching");
-  const [data, setData] = useState<PendingResponse>(EMPTY);
+  const [feedback, setFeedback] = useState<PendingResponse>(EMPTY); // PROD only
+  const [all, setAll] = useState<PendingResponse>(EMPTY);
+  const [started, setStarted] = useState<{ scope: string; count: number } | null>(null);
   const [error, setError] = useState("");
 
   const busy = phase === "fetching" || phase === "starting";
-  const scope = region ? region.toUpperCase() : "all regions";
-  const plural = data.count === 1 ? "" : "s";
-  const noun = isProd ? "feedback conversation" : "new / unanalyzed conversation";
-
-  const startAnalysisWith = async (r?: string) => {
-    setPhase("starting");
-    try {
-      await triggerSweep(r);
-      setPhase("started");
-    } catch {
-      setError("Couldn't start analysis. Please try again.");
-      setPhase("error");
-    }
-  };
+  const scopeLabel = region ? region.toUpperCase() : "all regions";
 
   const openAndFetch = async () => {
     setOpen(true);
     setPhase("fetching");
     setError("");
+    setStarted(null);
     try {
-      const found = await fetchPending(region);
-      setData(found);
-      // PROD: feedback conversations are analysed automatically — no confirmation step.
-      // Non-feedback PROD conversations are analysed via the per-conversation button instead.
-      if (isProd && found.count > 0) {
-        await startAnalysisWith(region);
+      if (isProd) {
+        const [fb, everything] = await Promise.all([
+          fetchPending(region, "feedback"),
+          fetchPending(region, "all"),
+        ]);
+        setFeedback(fb);
+        setAll(everything);
       } else {
-        setPhase("fetched");
+        setAll(await fetchPending(region, "all"));
       }
+      setPhase("ready");
     } catch {
       setError("Couldn't fetch conversations. Is the API running?");
+      setPhase("error");
+    }
+  };
+
+  const start = async (scope: "all" | "feedback", count: number) => {
+    setPhase("starting");
+    setStarted({ scope, count });
+    try {
+      await triggerSweep(region, scope);
+      setPhase("started");
+    } catch {
+      setError("Couldn't start analysis. Please try again.");
       setPhase("error");
     }
   };
@@ -103,62 +139,79 @@ export function AnalyzeNowButton({
       </Button>
 
       <Dialog open={open} onClose={close} maxWidth="sm" fullWidth aria-label="Analyze conversations">
-        <DialogTitle>Analyze conversations · {scope}</DialogTitle>
+        <DialogTitle>Analyze conversations · {scopeLabel}{isProd ? " · PROD" : ""}</DialogTitle>
         <DialogContent>
           {phase === "fetching" && (
             <Stack direction="row" spacing={1.5} alignItems="center" sx={{ py: 1 }}>
               <CircularProgress size={22} />
-              <Typography>
-                {isProd ? `Finding feedback conversations to analyze in ${scope}…` : `Fetching new / unanalyzed conversations in ${scope}…`}
-              </Typography>
+              <Typography>Fetching new / unanalyzed conversations in {scopeLabel}…</Typography>
             </Stack>
           )}
 
-          {phase === "fetched" &&
-            (data.count > 0 ? (
+          {phase === "ready" && !isProd && (
+            all.count > 0 ? (
               <Stack spacing={1.5}>
                 <Typography>
-                  Found <b>{data.count}</b> {noun}{plural} in {scope}.
+                  Found <b>{all.count}</b> new / unanalyzed conversation{all.count === 1 ? "" : "s"} in {scopeLabel}.
                 </Typography>
-                {!region && Object.keys(data.by_region).length > 0 && (
-                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                    {Object.entries(data.by_region).map(([lbl, n]) => (
-                      <Chip key={lbl} size="small" variant="outlined" label={`${lbl.toUpperCase()}: ${n}`} />
-                    ))}
-                  </Stack>
-                )}
-                {data.items.length > 0 && (
-                  <Box sx={{ maxHeight: 260, overflow: "auto", bgcolor: "action.hover", borderRadius: 1.5 }}>
-                    <List dense disablePadding>
-                      {data.items.map((it) => (
-                        <ListItem key={it.conversation_id} divider>
-                          <ListItemText
-                            primaryTypographyProps={{ noWrap: true, fontWeight: 600 }}
-                            secondaryTypographyProps={{ noWrap: true }}
-                            primary={it.title || it.tenant_name || it.conversation_id.slice(0, 8)}
-                            secondary={[it.region?.toUpperCase(), it.tenant_name, ago(it.last_message_at)]
-                              .filter(Boolean)
-                              .join(" · ")}
-                          />
-                        </ListItem>
-                      ))}
-                    </List>
-                  </Box>
-                )}
+                <PendingPreview data={all} showRegions={!region} />
               </Stack>
             ) : (
-              <Typography>
-                {isProd
-                  ? `No feedback conversations to analyze in ${scope} — they're already analyzed. (Analyze others individually from the conversation list.)`
-                  : `Everything is already analyzed in ${scope} — no new conversations found.`}
-              </Typography>
-            ))}
+              <Typography>Everything is already analyzed in {scopeLabel} — no new conversations found.</Typography>
+            )
+          )}
+
+          {phase === "ready" && isProd && (
+            <Stack spacing={2} divider={<Divider flexItem />}>
+              <Stack spacing={1}>
+                <Typography variant="subtitle2">Feedback conversations</Typography>
+                {feedback.count > 0 ? (
+                  <>
+                    <Typography variant="body2">
+                      <b>{feedback.count}</b> conversation{feedback.count === 1 ? "" : "s"} with user feedback are not analyzed yet.
+                    </Typography>
+                    <PendingPreview data={feedback} showRegions={!region} />
+                    <Box>
+                      <Button variant="contained" size="small" startIcon={<PlayArrowRoundedIcon />} onClick={() => start("feedback", feedback.count)}>
+                        Analyze feedback
+                      </Button>
+                    </Box>
+                  </>
+                ) : (
+                  <Typography variant="body2" color="text.secondary">All feedback conversations in {scopeLabel} are already analyzed.</Typography>
+                )}
+              </Stack>
+
+              <Stack spacing={1}>
+                <Typography variant="subtitle2">All conversations</Typography>
+                {all.count > 0 ? (
+                  <>
+                    <Typography variant="body2">
+                      <b>{all.count}</b> conversation{all.count === 1 ? "" : "s"} are not analyzed yet (feedback + normal).
+                    </Typography>
+                    <Alert severity="warning" sx={{ py: 0 }}>
+                      This analyzes <b>every</b> conversation in {scopeLabel}, including the feedback ones above.
+                    </Alert>
+                    <PendingPreview data={all} showRegions={!region} />
+                    <Box>
+                      <Button variant="outlined" color="warning" size="small" startIcon={<PlayArrowRoundedIcon />} onClick={() => start("all", all.count)}>
+                        Analyze all ({all.count})
+                      </Button>
+                    </Box>
+                  </>
+                ) : (
+                  <Typography variant="body2" color="text.secondary">Everything in {scopeLabel} is already analyzed.</Typography>
+                )}
+              </Stack>
+            </Stack>
+          )}
 
           {phase === "starting" && (
             <Stack direction="row" spacing={1.5} alignItems="center" sx={{ py: 1 }}>
               <CircularProgress size={22} />
               <Typography>
-                Analyzing {data.count} {noun}{plural} in {scope}…
+                Starting analysis of {started?.count} {started?.scope === "feedback" ? "feedback " : ""}conversation
+                {started?.count === 1 ? "" : "s"} in {scopeLabel}…
               </Typography>
             </Stack>
           )}
@@ -171,8 +224,8 @@ export function AnalyzeNowButton({
           <Button onClick={close} disabled={busy}>
             {phase === "started" ? "Close" : "Cancel"}
           </Button>
-          {!isProd && phase === "fetched" && data.count > 0 && (
-            <Button variant="contained" startIcon={<PlayArrowRoundedIcon />} onClick={() => startAnalysisWith(region)}>
+          {phase === "ready" && !isProd && all.count > 0 && (
+            <Button variant="contained" startIcon={<PlayArrowRoundedIcon />} onClick={() => start("all", all.count)}>
               Start analysis
             </Button>
           )}
