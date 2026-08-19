@@ -50,18 +50,20 @@ def _engine_for(url: str, db_name: str):
     )
 
 
-def configured_regions() -> list[RegionConfig]:
-    """All configured regions; falls back to the legacy single region if none are set."""
-    regs = settings.regions()
+def configured_regions(env: str = "uit") -> list[RegionConfig]:
+    """All configured regions for an environment; UIT falls back to the legacy single region."""
+    regs = settings.regions(env)
     if regs:
         return regs
+    if env != "uit":
+        return []
     primary = _primary_region()
     return [primary] if primary.url else []
 
 
-def resolve_region(label: str | None) -> RegionConfig | None:
-    """Region by label; if no label, the first configured region (the default)."""
-    regs = configured_regions()
+def resolve_region(label: str | None, env: str = "uit") -> RegionConfig | None:
+    """Region by label within an environment; if no label, the first configured region."""
+    regs = configured_regions(env)
     if not regs:
         return None
     if label:
@@ -81,25 +83,36 @@ _EXPECTED_TABLES = ["conversations", "messages", "feedback", "token_usage"]
 _PLATFORM_TABLES = ["threads", "thread_messages"]
 
 
+_LAYOUT_CACHE: dict[str, bool] = {}  # (db url + schema) → is-platform-schema; layout is static
+
+
 def _platform_layout(connection, schema: str) -> bool:
-    return connection.execute(
+    """Whether the schema uses the platform (threads) layout. Cached per db+schema — the layout
+    never changes for the life of the process, so this saves a round-trip on every dashboard call."""
+    key = f"{connection.engine.url}|{schema}"
+    cached = _LAYOUT_CACHE.get(key)
+    if cached is not None:
+        return cached
+    result = bool(connection.execute(
         text("select to_regclass(:relation) is not null"),
         {"relation": f"{schema}.threads"},
-    ).scalar_one()
+    ).scalar_one())
+    _LAYOUT_CACHE[key] = result
+    return result
 
 
-def region_labels() -> list[str]:
-    return [r.label for r in configured_regions()]
+def region_labels(env: str = "uit") -> list[str]:
+    return [r.label for r in configured_regions(env)]
 
 
-def check_regions() -> list[dict]:
-    """Test every configured region (READ-ONLY): connect + count the 4 required tables.
+def check_regions(env: str = "uit") -> list[dict]:
+    """Test every configured region (READ-ONLY): connect + count the required tables.
     Never raises — returns a per-region status so startup can log/continue."""
     out: list[dict] = []
-    for r in configured_regions():
+    for r in configured_regions(env):
         u = make_url(r.url)
         info: dict = {
-            "label": r.label, "host": u.host, "db": r.db_name, "schema": r.schema,
+            "env": env, "label": r.label, "host": u.host, "db": r.db_name, "schema": r.schema,
             "ok": False, "error": None, "counts": {},
         }
         try:
@@ -121,18 +134,27 @@ def check_regions() -> list[dict]:
     return out
 
 
-def load_one_from_chatdb(conversation_id: str, engine=None) -> Conversation | None:
-    """Load a single conversation by id, across all regions (for on-demand analyse)."""
-    convs = load_from_chatdb(engine=engine, ids=[conversation_id])
+def load_one_from_chatdb(conversation_id: str, engine=None, env: str = "uit") -> Conversation | None:
+    """Load a single conversation by id, across all regions of an env (for on-demand analyse)."""
+    convs = load_from_chatdb(engine=engine, ids=[conversation_id], env=env)
     return convs[0] if convs else None
 
 
-def _eligible_in_region(region: RegionConfig, engine, limit: int | None) -> list[str]:
+def _eligible_in_region(
+    region: RegionConfig, engine, limit: int | None, feedback_only: bool = False
+) -> list[str]:
+    """Eligible conversation ids in one region. When `feedback_only` (PROD posture), restrict to
+    conversations that carry explicit user feedback — PROD has far too many conversations to
+    bulk-analyse, so the sweep only touches the ones a customer reacted to (others are analysed
+    one-by-one via the per-conversation button)."""
     sch = safe_schema(region.schema)
     eng = engine or _engine_for(region.url, region.db_name)
     try:
         with eng.connect() as c:
             if _platform_layout(c, sch):
+                if feedback_only:
+                    # Feedback location isn't known for the platform schema → nothing bulk-eligible.
+                    return []
                 # Only threads that actually have messages — a message-less thread has no
                 # transcript to analyse and would otherwise be labelled from an empty prompt.
                 sql = (
@@ -143,11 +165,17 @@ def _eligible_in_region(region: RegionConfig, engine, limit: int | None) -> list
                 )
             else:
                 # Skip conversations with no rows in `messages` (empty/purged) — nothing to analyse.
+                feedback = (
+                    f"and exists (select 1 from \"{sch}\".messages m join \"{sch}\".feedback f "
+                    f"on f.message_id = m.id where m.conversation_id = conversations.id) "
+                    if feedback_only else
+                    f"and exists (select 1 from \"{sch}\".messages m where m.conversation_id = conversations.id) "
+                )
                 sql = (
                     f"select id from \"{sch}\".conversations "
                     f"where is_deleted = false "
                     f"and (last_message_at is null or last_message_at < now() - interval '5 minutes') "
-                    f"and exists (select 1 from \"{sch}\".messages m where m.conversation_id = conversations.id) "
+                    f"{feedback}"
                     f"order by last_message_at desc nulls last"
                 )
             if limit:
@@ -174,22 +202,22 @@ def eligible_conversation_ids(limit: int | None = None, engine=None) -> list[str
 
 
 def load_from_chatdb(
-    limit: int | None = None, engine=None, ids: list[str] | None = None
+    limit: int | None = None, engine=None, ids: list[str] | None = None, env: str = "uit"
 ) -> list[Conversation]:
-    """Load conversations across ALL configured regions (each tagged with its region)."""
+    """Load conversations across ALL configured regions of an env (each tagged region+env)."""
     if engine is not None:  # explicit engine → single region (tests / dashboard helpers)
-        return _load_region(_primary_region(), limit=limit, ids=ids, engine=engine)
+        return _load_region(_primary_region(), limit=limit, ids=ids, engine=engine, env=env)
     out: list[Conversation] = []
-    for region in configured_regions():
+    for region in configured_regions(env):
         try:
-            out += _load_region(region, limit=limit, ids=ids)
+            out += _load_region(region, limit=limit, ids=ids, env=env)
         except Exception as ex:  # noqa: BLE001 - skip an unreachable region, keep the rest
             print(f"[warn] load skipped region '{region.label}': {type(ex).__name__}", flush=True)
     return out
 
 
 def _load_platform_region(
-    region: RegionConfig, limit: int, engine, ids: list[str] | None = None
+    region: RegionConfig, limit: int, engine, ids: list[str] | None = None, env: str = "uit"
 ) -> list[Conversation]:
     sch = safe_schema(region.schema)
     with engine.connect() as c:
@@ -255,13 +283,15 @@ def _load_platform_region(
             messages=messages_by_thread.get(str(row["id"]), []),
             feedback=Feedback(),
             region=region.label,
+            environment=env,
         )
         for row in threads
     ]
 
 
 def _load_region(
-    region: RegionConfig, limit: int | None = None, engine=None, ids: list[str] | None = None
+    region: RegionConfig, limit: int | None = None, engine=None, ids: list[str] | None = None,
+    env: str = "uit",
 ) -> list[Conversation]:
     limit = limit or settings.chatdb_limit
     sch = safe_schema(region.schema)
@@ -270,7 +300,7 @@ def _load_region(
         with eng.connect() as c:
             platform = _platform_layout(c, sch)
         if platform:
-            return _load_platform_region(region, limit, eng, ids)
+            return _load_platform_region(region, limit, eng, ids, env=env)
         with eng.connect() as c:
             if ids is not None:
                 convs = c.execute(
@@ -383,6 +413,7 @@ def _load_region(
                 messages=messages,
                 feedback=conv_feedback,
                 region=region.label,  # tag the source region → flows into the analysis record
+                environment=env,  # tag the source environment → strict isolation in the store
             )
         )
     return conversations

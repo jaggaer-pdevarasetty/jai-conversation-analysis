@@ -1,6 +1,7 @@
 """Manual analysis trigger (POST /analyze/sweep) replaces the scheduled sweep."""
 
 import threading
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -25,21 +26,39 @@ def test_analyze_pending_returns_a_count():
     assert "count" in body and body["count"] == 0
 
 
+def test_analyze_pending_returns_every_conversation(monkeypatch):
+    ids = [f"c{index}" for index in range(16)]
+    monkeypatch.setattr(main_module, "settings", SimpleNamespace(source="chatdb"))
+    monkeypatch.setattr(main_module.store, "analysed_ids", lambda env="uit": set())
+    monkeypatch.setattr(main_module, "_eligible_by_region", lambda region=None, env="uit", feedback_only=False: {"us": ids})
+    monkeypatch.setattr(
+        "app.dashboard.conversation_meta",
+        lambda conversation_ids, region=None, env="uit": {
+            cid: {"region": "us", "title": cid, "tenant_name": "Tenant", "last_message_at": None}
+            for cid in conversation_ids
+        },
+    )
+    body = main_module.analyze_pending(region=None)
+    assert body["count"] == 16
+    assert len(body["ids"]) == 16
+    assert len(body["items"]) == 16
+
+
 def test_trigger_sweep_runs_once_and_dedupes(monkeypatch):
-    monkeypatch.setattr(main_module, "_sweep_running", False, raising=False)
+    monkeypatch.setattr(main_module, "_sweeps_running", set(), raising=False)
     started, release, calls = threading.Event(), threading.Event(), []
 
-    def fake_sweep(region=None):
+    def fake_sweep(region=None, env="uit", feedback_only=False):
         calls.append(region)
         started.set()
         release.wait(timeout=2)
 
     monkeypatch.setattr(main_module, "_sweep", fake_sweep)
-    assert main_module.trigger_sweep() is True        # kicks off a background sweep
+    assert main_module.trigger_sweep() is True        # kicks off a background UIT sweep
     assert started.wait(timeout=2)
-    assert main_module.trigger_sweep() is False       # already running → deduped, no pile-up
+    assert main_module.trigger_sweep() is False       # same env already running → deduped
+    assert main_module.trigger_sweep(env="prod") is True  # other env is independent → not blocked
     release.set()
-    assert calls == [None]  # ran exactly once, all-regions
 
 
 def test_analyze_rejects_empty_conversation(monkeypatch):
@@ -47,7 +66,7 @@ def test_analyze_rejects_empty_conversation(monkeypatch):
     from app.domain.models import Conversation, Feedback
 
     empty = Conversation(id="x1", tenant_id="t", title=None, created_at="", messages=[], feedback=Feedback())
-    monkeypatch.setattr("app.chatdb.load_one_from_chatdb", lambda cid: empty)
+    monkeypatch.setattr("app.chatdb.load_one_from_chatdb", lambda cid, env="uit": empty)
     r = client.post("/api/analysis/conversations/x1/analyze")
     assert r.status_code == 422
     assert r.json()["title"] == "No transcript"

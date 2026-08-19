@@ -34,17 +34,18 @@ def collect_rows(store, scope: str = "all", region: str | None = None,
                  rating: str | None = None, category: str | None = None, *,
                  query: str | None = None, tenant: str | None = None,
                  date_range: str | None = None, date_from=None, date_to=None,
-                 sort: str = "newest") -> list[dict]:
-    """All feedback conversations in scope (no pagination), each with full detail + transcript.
+                 sort: str = "newest", env: str = "uit") -> list[dict]:
+    """All feedback conversations in scope for an environment (no pagination), each with full
+    detail + transcript.
 
     Honours the SAME filters as GET /feedback (search text, tenant, activity date range, sort) so
     a download matches exactly what the reviewer has on screen.
     """
-    records = store.list(region=region)
-    convs = store.get_conversations([r.conversation_id for r in records])
+    records = store.list(region=region, env=env)
+    convs = store.get_conversations([r.conversation_id for r in records], env)
     try:
         from . import dashboard
-        meta = dashboard.conversation_meta([r.conversation_id for r in records], region=region)
+        meta = dashboard.conversation_meta([r.conversation_id for r in records], region=region, env=env)
     except Exception:  # noqa: BLE001 - chat DB metadata is best-effort
         meta = {}
 

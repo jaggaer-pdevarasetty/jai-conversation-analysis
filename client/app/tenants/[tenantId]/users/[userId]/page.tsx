@@ -2,6 +2,7 @@
 
 import ArrowForwardRoundedIcon from "@mui/icons-material/ArrowForwardRounded";
 import ChatBubbleOutlineRoundedIcon from "@mui/icons-material/ChatBubbleOutlineRounded";
+import PlayArrowRoundedIcon from "@mui/icons-material/PlayArrowRounded";
 import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
 import {
   Alert,
@@ -35,6 +36,7 @@ import { CategoryChip } from "../../../../../src/components/CategoryChip";
 import { MarkdownContent } from "../../../../../src/components/MarkdownContent";
 import { useRegion } from "../../../../../src/components/RegionContext";
 import { StatCard } from "../../../../../src/components/StatCard";
+import { analyzeConversation } from "../../../../../src/services/analysisApi";
 import {
   fetchTenants,
   fetchTenantUsers,
@@ -43,6 +45,36 @@ import {
   type TenantUser,
   type UserConversation,
 } from "../../../../../src/services/dashboardApi";
+
+/** Per-conversation on-demand analyse (the way PROD conversations get analysed — only when a
+ * reviewer clicks). The current environment is applied automatically by the API layer. */
+function AnalyzeButton({ id, onDone }: { id: string; onDone: () => void | Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const run = async () => {
+    setBusy(true);
+    setFailed(false);
+    try {
+      await analyzeConversation(id);
+      await onDone();
+    } catch {
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Button
+      size="small"
+      variant="outlined"
+      disabled={busy}
+      onClick={run}
+      startIcon={busy ? <CircularProgress size={14} /> : <PlayArrowRoundedIcon />}
+    >
+      {busy ? "Analysing…" : failed ? "Retry" : "Analyze"}
+    </Button>
+  );
+}
 
 function StatusCell({ c }: { c: UserConversation }) {
   if (c.status === "analysing") {
@@ -239,8 +271,10 @@ export default function UserConversationsPage() {
                 <TableCell align="right">
                   {conversation.analysed ? (
                     <Button component={Link} href={`/conversations/${conversation.conversation_id}`} size="small" endIcon={<ArrowForwardRoundedIcon />}>Review</Button>
+                  ) : conversation.status === "analysing" ? (
+                    <Typography variant="caption" color="text.secondary">Analysing…</Typography>
                   ) : (
-                    <Typography variant="caption" color="text.secondary">Waiting</Typography>
+                    <AnalyzeButton id={conversation.conversation_id} onDone={load} />
                   )}
                 </TableCell>
               </TableRow>

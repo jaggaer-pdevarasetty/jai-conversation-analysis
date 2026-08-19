@@ -23,4 +23,14 @@ describe("MarkdownContent HTML handling", () => {
     expect(screen.getByText(/the guide/)).toBeInTheDocument();
     expect(screen.getByText(/this box/)).toBeInTheDocument();
   });
+
+  it("renders redacted tables whose rows have missing cells", () => {
+    render(
+      <MarkdownContent>{'| Invoice | Status | Amount |\n| --- | --- | ---: |\n| <a href="https://example.test">3917582</a> | Paid |\n| 3917583 | Payable | 100.00 |'}</MarkdownContent>,
+    );
+    expect(screen.getByRole("table")).toBeInTheDocument();
+    expect(screen.getAllByRole("row")).toHaveLength(3);
+    expect(screen.getByText("3917582")).toBeInTheDocument();
+    expect(screen.queryByText(/<a href/)).not.toBeInTheDocument();
+  });
 });

@@ -111,7 +111,7 @@ def enrich(convs: list[Conversation]) -> None:
     for c in convs:
         if c.enrichment is not None or not c.region:
             continue
-        e = fetch_enrichment(c.id, c.region)
+        e = fetch_enrichment(c.id, c.region, c.environment)
         if e is None:
             continue
         c.enrichment = e
@@ -201,6 +201,7 @@ def _record(conv: Conversation, run_id: str, now: str, p: dict | None) -> Analys
         analyzer_version=f"vertex:{settings.gemini_model}",
         analyzed_at=now,
         region=conv.region,
+        environment=conv.environment,
         tenant_id=conv.tenant_id,
         enrichment=conv.enrichment,
     )

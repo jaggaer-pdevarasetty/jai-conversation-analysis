@@ -1,4 +1,5 @@
 import { API_BASE } from "../config";
+import { withEnv } from "./env";
 
 export interface Metrics {
   ttft_ms: number | null;
@@ -182,7 +183,7 @@ export async function fetchFeedback(params: FeedbackQuery = {}): Promise<Feedbac
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== "") url.searchParams.set(key, String(value));
   });
-  const res = await fetch(url.toString());
+  const res = await fetch(withEnv(url).toString());
   if (!res.ok) throw new Error(`Analysis API responded ${res.status}`);
   return (await res.json()) as FeedbackListResponse;
 }
@@ -207,7 +208,7 @@ export const CATEGORIES = [
 ] as const;
 
 async function getJson<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`);
+  const res = await fetch(withEnv(new URL(`${API_BASE}${path}`)).toString());
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { detail?: string } | null;
     throw new Error(body?.detail ?? `Analysis API responded ${res.status}`);
@@ -221,7 +222,7 @@ export async function fetchAnalysis(params: AnalysisQuery = {}): Promise<ListRes
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== "") url.searchParams.set(key, String(value));
   });
-  const res = await fetch(url.toString());
+  const res = await fetch(withEnv(url).toString());
   if (!res.ok) throw new Error(`Analysis API responded ${res.status}`);
   return (await res.json()) as ListResponse;
 }
@@ -279,26 +280,29 @@ export function feedbackExportUrl(params: FeedbackExportParams = {}): string {
   if (params.date_from) url.searchParams.set("date_from", params.date_from);
   if (params.date_to) url.searchParams.set("date_to", params.date_to);
   if (params.sort && params.sort !== "newest") url.searchParams.set("sort", params.sort);
-  return url.toString();
+  return withEnv(url).toString();
 }
 
 /** Step 1: fetch (don't analyse) the new / unanalysed conversations for the selected region
  * (or all regions when region is empty) — count, per-region breakdown, and brief details. */
-export async function fetchPending(region?: string): Promise<PendingResponse> {
+export async function fetchPending(region?: string, scope?: string): Promise<PendingResponse> {
   const url = new URL(`${API_BASE}/api/analysis/analyze/pending`);
   if (region) url.searchParams.set("region", region);
-  const res = await fetch(url.toString());
+  if (scope) url.searchParams.set("scope", scope);
+  const res = await fetch(withEnv(url).toString());
   if (!res.ok) throw new Error(`Fetch pending failed: ${res.status}`);
   const d = (await res.json()) as Partial<PendingResponse>;
   return { count: d.count ?? 0, ids: d.ids ?? [], by_region: d.by_region ?? {}, items: d.items ?? [] };
 }
 
 /** Step 2: start the background analysis of not-yet-analysed conversations (deduped) for the
- * selected region (or all). Returns the server status ("started" | "already_running"). */
-export async function triggerSweep(region?: string): Promise<string> {
+ * selected region (or all). `scope=feedback` restricts to feedback conversations; `scope=all`
+ * analyses every conversation. Returns the server status ("started" | "already_running"). */
+export async function triggerSweep(region?: string, scope?: string): Promise<string> {
   const url = new URL(`${API_BASE}/api/analysis/analyze/sweep`);
   if (region) url.searchParams.set("region", region);
-  const res = await fetch(url.toString(), { method: "POST" });
+  if (scope) url.searchParams.set("scope", scope);
+  const res = await fetch(withEnv(url).toString(), { method: "POST" });
   if (!res.ok) throw new Error(`Analyse sweep failed: ${res.status}`);
   const data = (await res.json()) as { status?: string };
   return data.status ?? "started";
@@ -306,22 +310,18 @@ export async function triggerSweep(region?: string): Promise<string> {
 
 /** On-demand (re)analyse one conversation now (capped server-side per day). */
 export async function analyzeConversation(id: string): Promise<void> {
-  const res = await fetch(
-    `${API_BASE}/api/analysis/conversations/${encodeURIComponent(id)}/analyze`,
-    { method: "POST" },
-  );
+  const url = new URL(`${API_BASE}/api/analysis/conversations/${encodeURIComponent(id)}/analyze`);
+  const res = await fetch(withEnv(url).toString(), { method: "POST" });
   if (!res.ok) throw new Error(`Analyse failed: ${res.status}`);
 }
 
 /** Human override of the category (audited). */
 export async function overrideCategory(id: string, category: string, actor: string): Promise<void> {
-  const res = await fetch(
-    `${API_BASE}/api/analysis/conversations/${encodeURIComponent(id)}/override`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ category, actor }),
-    },
-  );
+  const url = new URL(`${API_BASE}/api/analysis/conversations/${encodeURIComponent(id)}/override`);
+  const res = await fetch(withEnv(url).toString(), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ category, actor }),
+  });
   if (!res.ok) throw new Error(`Override failed: ${res.status}`);
 }

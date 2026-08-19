@@ -72,9 +72,10 @@ def test_fetch_never_raises_on_bad_project(monkeypatch):
 
     fake = SimpleNamespace(
         enrichment_enabled=True, langsmith_api_key="k",
+        langsmith_api_key_for=lambda env="uit": "k",
         langsmith_base_url="https://x", enrichment_max_runs=5,
-        langsmith_project_for=lambda region: "uit_us",
+        langsmith_project_for=lambda region, env="uit": "uit_us",
     )
     monkeypatch.setattr(enrichment, "settings", fake)
-    monkeypatch.setattr(enrichment, "_project_id", lambda name: None)  # project not found
+    monkeypatch.setattr(enrichment, "_project_id", lambda name, env="uit": None)  # project not found
     assert fetch_enrichment("id", "us") is None

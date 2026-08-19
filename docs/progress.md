@@ -211,6 +211,26 @@ non-English handling. Working on branch **`feature/J1-93353-conversation-analysi
 - Audited every frontend route and restarted the dev server only after a clean production build.
 - Green: **client 24 jest + typecheck + lint + production build**; all eight frontend routes return 200.
 
+## Done — execution increment 19 (environment toggle: UIT / PROD)
+- Added an **environment** axis (uit/prod) orthogonal to region (ADR-0020). A UIT/PROD toggle in
+  the app bar (remember-last) switches the whole app; every request carries `?env=`.
+- **Strict isolation**: results store now keyed by `(conversation_id, environment)` with an
+  idempotent startup migration (existing rows → uit); every read/write/count filters by env.
+- **PROD posture** (manual, no auto/boot sweep): the **Analyze** dialog splits into two scopes —
+  **Analyze feedback** (`scope=feedback`) and **Analyze all** (`scope=all`, warned it includes
+  feedback); conversations can also be analysed one at a time. UIT keeps the single-list dialog.
+  Existing PROD feedback was seeded once; future PROD analysis is user-triggered. lazy-analyse UIT-only.
+- **Separate queues per env**: `/queue?env=` is filtered by environment (items + counts), so the UIT
+  live queue never shows PROD work and vice-versa (one queue instance, `(env, id)` items).
+- **Performance**: the dashboard's per-region chat-DB queries (overview, conversation_meta, tenants,
+  users, user-conversations, eligibility) now run **concurrently** instead of sequentially, the
+  schema-layout probe is **cached**, and the dashboard connection pool is **warmed at startup**.
+  Overview ~4.3s→~1.4s, feedback ~3.1s→~1.2s (≈3× faster; first request no longer cold).
+- Config via `PROD_*` vars (currently pointed at UIT as a dummy for end-to-end testing until real
+  PROD credentials exist). Verified live: browse/filters/regions per env, feedback-only pending
+  (PROD 358 vs UIT 17), analyze one PROD conversation → stored PROD-only (UIT untouched).
+- ADR-0020 + openapi (`/environments`, `env` params) + tests (store isolation, config).
+
 ## Done — execution increment 18 (feedback export + empty-conversation guard)
 - Added a **Download** button on the Feedback page (CSV / PDF / JSON) → `GET /api/analysis/feedback/export`.
   Each export includes, per feedback conversation: category, confidence, feedback type + user remark,

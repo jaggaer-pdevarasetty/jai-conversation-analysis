@@ -106,6 +106,24 @@ def test_platform_threads_map_to_conversations():
     assert conversations[0].feedback.rating is None
 
 
+def test_dashboard_telemetry_uses_all_records(monkeypatch):
+    from app import dashboard
+
+    store = CommonStore()
+    complete = _conv("complete", "us", "1", replied=True)
+    complete.messages[-1].ttft_ms = 100
+    complete.messages[-1].input_tokens = 10
+    complete.messages[-1].output_tokens = 5
+    incomplete = _conv("incomplete", "us", "1", replied=True)
+    store.upsert(analyze(complete, "run"), deidentify(complete))
+    store.upsert(analyze(incomplete, "run"), deidentify(incomplete))
+    monkeypatch.setattr(dashboard, "_scan_labels", lambda region, env="uit": [])
+
+    result = dashboard.overview(store, "us")
+    assert result["telemetry_complete"] == 1
+    assert result["telemetry_total"] == 2
+
+
 def test_dashboard_timestamps_are_iso_formatted():
     from app.dashboard import _timestamp
 
@@ -129,7 +147,7 @@ def test_dashboard_reuses_region_engine(monkeypatch):
     monkeypatch.setattr(
         dashboard,
         "resolve_region",
-        lambda _region: SimpleNamespace(url="postgresql://example", db_name="chat", schema="chat"),
+        lambda _region, _env="uit": SimpleNamespace(url="postgresql://example", db_name="chat", schema="chat"),
     )
     monkeypatch.setattr(
         dashboard,
