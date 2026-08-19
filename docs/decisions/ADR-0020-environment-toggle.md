@@ -23,13 +23,16 @@ Add **environment** (`uit` default, `prod`) as a first-class axis orthogonal to 
   `(conversation_id, environment)`; every read/write/count filters by env. One results DB, but
   UIT and PROD can never collide or leak — even when they share conversation ids (as the dummy
   does). Existing rows are backfilled to `uit` by an idempotent startup migration.
-- **PROD analysis posture** (volume-aware, opt-in):
+- **PROD analysis posture** (volume-aware):
   - Browse everything (dashboard/tenants/conversations) straight from the PROD chat DB — no
     analysis required.
-  - **No auto-analysis** in PROD (`lazy_analyze` is UIT-only).
-  - **Per-conversation "Analyze"** button analyses exactly one conversation on demand.
-  - The **bulk sweep** in PROD is restricted to **conversations with user feedback** (others are
-    never bulk-analysed).
+  - **Conversations WITH user feedback are auto-analysed** (no per-item permission): existing
+    ones "till now" via a background sweep on a FastAPI **startup event**, and any new ones when a
+    reviewer clicks **Analyze** (which, in PROD, fetches + starts immediately — no confirmation).
+    Bulk analysis in PROD is always **feedback-only**.
+  - **Conversations WITHOUT feedback are analysed only on demand** — the reviewer clicks the
+    **per-conversation Analyze** button. General `lazy_analyze` (auto-analyse on open) stays
+    **UIT-only**, so browsing PROD never analyses its huge no-feedback volume.
 - **Guards carry over**: PII/quasi-identifier scrubbing, prompt-injection safety, empty-transcript
   skip, read-only SELECT-only access, dedup/retry/dead-letter, per-conversation daily cap.
 

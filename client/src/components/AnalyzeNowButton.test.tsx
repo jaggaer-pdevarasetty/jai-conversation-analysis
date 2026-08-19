@@ -7,11 +7,16 @@ jest.mock("../services/analysisApi", () => ({
   fetchPending: jest.fn(),
   triggerSweep: jest.fn(),
 }));
+let mockEnv = "uit";
+jest.mock("./EnvContext", () => ({
+  useEnv: () => ({ env: mockEnv, setEnv: () => {}, environments: ["uit", "prod"], loading: false }),
+}));
 const mockFetch = fetchPending as jest.MockedFunction<typeof fetchPending>;
 const mockTrigger = triggerSweep as jest.MockedFunction<typeof triggerSweep>;
 
 describe("AnalyzeNowButton (two-step, region-aware)", () => {
   beforeEach(() => {
+    mockEnv = "uit";
     mockFetch.mockReset();
     mockTrigger.mockReset();
   });
@@ -60,5 +65,18 @@ describe("AnalyzeNowButton (two-step, region-aware)", () => {
     render(<AnalyzeNowButton />);
     await userEvent.click(screen.getByRole("button", { name: /analyze/i }));
     expect(await screen.findByText(/couldn't fetch conversations/i)).toBeInTheDocument();
+  });
+
+  it("in PROD auto-analyses feedback conversations with no Start-analysis confirmation", async () => {
+    mockEnv = "prod";
+    mockFetch.mockResolvedValue({ count: 5, ids: ["a"], by_region: { us: 5 }, items: [] });
+    mockTrigger.mockResolvedValue("started");
+    render(<AnalyzeNowButton />);
+
+    await userEvent.click(screen.getByRole("button", { name: /analyze/i }));
+    // no confirmation button — analysis starts automatically
+    expect(screen.queryByRole("button", { name: /start analysis/i })).not.toBeInTheDocument();
+    expect(await screen.findByText(/analysis started/i)).toBeInTheDocument();
+    expect(mockTrigger).toHaveBeenCalledTimes(1);
   });
 });

@@ -19,6 +19,7 @@ import {
 } from "@mui/material";
 import { useState } from "react";
 import { fetchPending, triggerSweep, type PendingResponse } from "../services/analysisApi";
+import { useEnv } from "./EnvContext";
 import { useRegion } from "./RegionContext";
 
 type Phase = "fetching" | "fetched" | "starting" | "started" | "error";
@@ -48,6 +49,8 @@ export function AnalyzeNowButton({
   label?: string;
 }) {
   const { region } = useRegion(); // "" = all regions
+  const { env } = useEnv();
+  const isProd = env === "prod"; // PROD analyses feedback conversations automatically
   const [open, setOpen] = useState(false);
   const [phase, setPhase] = useState<Phase>("fetching");
   const [data, setData] = useState<PendingResponse>(EMPTY);
@@ -56,27 +59,35 @@ export function AnalyzeNowButton({
   const busy = phase === "fetching" || phase === "starting";
   const scope = region ? region.toUpperCase() : "all regions";
   const plural = data.count === 1 ? "" : "s";
+  const noun = isProd ? "feedback conversation" : "new / unanalyzed conversation";
+
+  const startAnalysisWith = async (r?: string) => {
+    setPhase("starting");
+    try {
+      await triggerSweep(r);
+      setPhase("started");
+    } catch {
+      setError("Couldn't start analysis. Please try again.");
+      setPhase("error");
+    }
+  };
 
   const openAndFetch = async () => {
     setOpen(true);
     setPhase("fetching");
     setError("");
     try {
-      setData(await fetchPending(region));
-      setPhase("fetched");
+      const found = await fetchPending(region);
+      setData(found);
+      // PROD: feedback conversations are analysed automatically — no confirmation step.
+      // Non-feedback PROD conversations are analysed via the per-conversation button instead.
+      if (isProd && found.count > 0) {
+        await startAnalysisWith(region);
+      } else {
+        setPhase("fetched");
+      }
     } catch {
       setError("Couldn't fetch conversations. Is the API running?");
-      setPhase("error");
-    }
-  };
-
-  const startAnalysis = async () => {
-    setPhase("starting");
-    try {
-      await triggerSweep(region);
-      setPhase("started");
-    } catch {
-      setError("Couldn't start analysis. Please try again.");
       setPhase("error");
     }
   };
@@ -97,7 +108,9 @@ export function AnalyzeNowButton({
           {phase === "fetching" && (
             <Stack direction="row" spacing={1.5} alignItems="center" sx={{ py: 1 }}>
               <CircularProgress size={22} />
-              <Typography>Fetching new / unanalyzed conversations in {scope}…</Typography>
+              <Typography>
+                {isProd ? `Finding feedback conversations to analyze in ${scope}…` : `Fetching new / unanalyzed conversations in ${scope}…`}
+              </Typography>
             </Stack>
           )}
 
@@ -105,7 +118,7 @@ export function AnalyzeNowButton({
             (data.count > 0 ? (
               <Stack spacing={1.5}>
                 <Typography>
-                  Found <b>{data.count}</b> new / unanalyzed conversation{plural} in {scope}.
+                  Found <b>{data.count}</b> {noun}{plural} in {scope}.
                 </Typography>
                 {!region && Object.keys(data.by_region).length > 0 && (
                   <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
@@ -134,14 +147,18 @@ export function AnalyzeNowButton({
                 )}
               </Stack>
             ) : (
-              <Typography>Everything is already analyzed in {scope} — no new conversations found.</Typography>
+              <Typography>
+                {isProd
+                  ? `No feedback conversations to analyze in ${scope} — they're already analyzed. (Analyze others individually from the conversation list.)`
+                  : `Everything is already analyzed in ${scope} — no new conversations found.`}
+              </Typography>
             ))}
 
           {phase === "starting" && (
             <Stack direction="row" spacing={1.5} alignItems="center" sx={{ py: 1 }}>
               <CircularProgress size={22} />
               <Typography>
-                Starting analysis of {data.count} conversation{plural} in {scope}…
+                Analyzing {data.count} {noun}{plural} in {scope}…
               </Typography>
             </Stack>
           )}
@@ -154,8 +171,8 @@ export function AnalyzeNowButton({
           <Button onClick={close} disabled={busy}>
             {phase === "started" ? "Close" : "Cancel"}
           </Button>
-          {phase === "fetched" && data.count > 0 && (
-            <Button variant="contained" startIcon={<PlayArrowRoundedIcon />} onClick={startAnalysis}>
+          {!isProd && phase === "fetched" && data.count > 0 && (
+            <Button variant="contained" startIcon={<PlayArrowRoundedIcon />} onClick={() => startAnalysisWith(region)}>
               Start analysis
             </Button>
           )}

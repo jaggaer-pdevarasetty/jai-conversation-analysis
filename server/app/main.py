@@ -122,8 +122,9 @@ if settings.source == "chatdb":
     if not any(h["ok"] for h in region_health):
         print("[startup][warn] NO region is readable — dashboards will be empty until fixed.", flush=True)
 
-    # MANUAL mode: workers are ready, but analysis runs ONLY when triggered from the UI
-    # (POST /analyze/sweep). No boot sweep and no scheduled cadence.
+    # UIT: manual — analysis runs only when triggered from the UI (no boot/scheduled sweep).
+    # PROD feedback conversations are auto-analysed by a FastAPI startup event (below) so the
+    # background sweep spawns reliably after the app is up (not during module import).
     analysis_queue.start()
     latest_run = run_analysis(store, [], analyze_batch=make_batch_analyzer())  # empty summary
 else:
@@ -815,3 +816,12 @@ def trigger_run():
 
 
 app.include_router(api)
+
+
+@app.on_event("startup")
+def _auto_analyse_prod_feedback() -> None:
+    """PROD: auto-analyse conversations that already have user feedback ("till now") — in the
+    background, once, without any user action. Non-feedback PROD conversations are analysed on
+    demand (per-conversation button). UIT stays fully manual."""
+    if settings.source == "chatdb" and "prod" in settings.environments():
+        trigger_sweep(env="prod")
