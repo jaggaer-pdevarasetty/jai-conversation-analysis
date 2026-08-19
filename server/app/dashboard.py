@@ -14,6 +14,7 @@ identity, broader than the pooled area (ADR-0007 / AC-10). Keep access restricte
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from functools import lru_cache
 
@@ -52,6 +53,31 @@ def _scan_labels(region: str | None, env: str = "uit") -> list[str | None]:
     return list(region_labels(env)) or [None]
 
 
+def _map_regions(labels: list, worker) -> list:
+    """Run worker(label) for each region CONCURRENTLY and return the successful results. Chat DBs
+    are remote (network-bound), and regions are independent, so fanning out turns N sequential
+    round-trips into ~1. A region that errors (unreachable / schema mismatch) is skipped so one
+    bad region can't break or slow the whole view."""
+    labels = list(labels)
+    if len(labels) <= 1:  # nothing to parallelise
+        out = []
+        for label in labels:
+            try:
+                out.append(worker(label))
+            except Exception as ex:  # noqa: BLE001
+                print(f"[warn] dashboard region '{label}' skipped: {type(ex).__name__}", flush=True)
+        return out
+    results = []
+    with ThreadPoolExecutor(max_workers=min(len(labels), 6)) as pool:
+        futures = {pool.submit(worker, label): label for label in labels}
+        for fut in futures:
+            try:
+                results.append(fut.result())
+            except Exception as ex:  # noqa: BLE001 - one bad region must not break the view
+                print(f"[warn] dashboard region '{futures[fut]}' skipped: {type(ex).__name__}", flush=True)
+    return results
+
+
 def overview(store: CommonStore, region: str | None = None, env: str = "uit") -> dict:
     # 'All regions' (region=None) combines every configured region; unreachable regions are
     # skipped so one bad region can't blank the overview. Tenants/users are counted DISTINCT
@@ -60,21 +86,22 @@ def overview(store: CommonStore, region: str | None = None, env: str = "uit") ->
     tenant_ids: set[str] = set()
     user_ids: set[str] = set()
     conversations_n = 0
-    for label in _scan_labels(region, env):
-        try:
-            with _connect(label, env) as (c, sch):
-                table = "threads" if _platform_layout(c, sch) else "conversations"
-                where = "" if table == "threads" else " where is_deleted = false"
-                for r in c.execute(text(f'select distinct tenant_id, user_id from "{sch}".{table}{where}')).all():
-                    if r[0] is not None:
-                        tenant_ids.add(str(r[0]))
-                    if r[1] is not None:
-                        user_ids.add(str(r[1]))
-                conversations_n += int(
-                    c.execute(text(f'select count(*) from "{sch}".{table}{where}')).scalar_one()
-                )
-        except Exception:  # noqa: BLE001 - region unreachable → skip, don't fail the overview
-            continue
+
+    def _one(label):
+        with _connect(label, env) as (c, sch):
+            table = "threads" if _platform_layout(c, sch) else "conversations"
+            where = "" if table == "threads" else " where is_deleted = false"
+            pairs = c.execute(text(f'select distinct tenant_id, user_id from "{sch}".{table}{where}')).all()
+            n = int(c.execute(text(f'select count(*) from "{sch}".{table}{where}')).scalar_one())
+            return pairs, n
+
+    for pairs, n in _map_regions(_scan_labels(region, env), _one):
+        for r in pairs:
+            if r[0] is not None:
+                tenant_ids.add(str(r[0]))
+            if r[1] is not None:
+                user_ids.add(str(r[1]))
+        conversations_n += n
     records = store.list(region=region, env=env)
     counts = store.count_by_category(region=region, env=env)
     telemetry_complete = sum(
@@ -100,32 +127,31 @@ def tenants(region: str | None = None, env: str = "uit") -> list[dict]:
     # Merge tenants across all regions when region is None (same tenant in two regions is
     # combined). Unreachable regions are skipped.
     merged: dict[str, dict] = {}
-    for label in _scan_labels(region, env):
-        try:
-            with _connect(label, env) as (c, sch):
-                if _platform_layout(c, sch):
-                    rows = c.execute(
-                        text(
-                            f'select conv.tenant_id, t.name, count(*) conversations, '
-                            f'count(distinct conv.user_id) users '
-                            f'from "{sch}".threads conv '
-                            f'left join "{sch}".tenants t on t.id::text = conv.tenant_id '
-                            f'group by conv.tenant_id, t.name order by conversations desc'
-                        )
-                    ).mappings().all()
-                else:
-                    rows = c.execute(
-                        text(
-                            f'select conv.tenant_id, t.name, count(*) conversations, '
-                            f'count(distinct conv.user_id) users '
-                            f'from "{sch}".conversations conv '
-                            f'left join "{sch}".tenants t on t.tenant_id = conv.tenant_id '
-                            f'where conv.is_deleted = false '
-                            f'group by conv.tenant_id, t.name order by conversations desc'
-                        )
-                    ).mappings().all()
-        except Exception:  # noqa: BLE001 - region unreachable → skip
-            continue
+
+    def _one(label):
+        with _connect(label, env) as (c, sch):
+            if _platform_layout(c, sch):
+                return c.execute(
+                    text(
+                        f'select conv.tenant_id, t.name, count(*) conversations, '
+                        f'count(distinct conv.user_id) users '
+                        f'from "{sch}".threads conv '
+                        f'left join "{sch}".tenants t on t.id::text = conv.tenant_id '
+                        f'group by conv.tenant_id, t.name order by conversations desc'
+                    )
+                ).mappings().all()
+            return c.execute(
+                text(
+                    f'select conv.tenant_id, t.name, count(*) conversations, '
+                    f'count(distinct conv.user_id) users '
+                    f'from "{sch}".conversations conv '
+                    f'left join "{sch}".tenants t on t.tenant_id = conv.tenant_id '
+                    f'where conv.is_deleted = false '
+                    f'group by conv.tenant_id, t.name order by conversations desc'
+                )
+            ).mappings().all()
+
+    for rows in _map_regions(_scan_labels(region, env), _one):
         for r in rows:
             tid = str(r["tenant_id"])
             m = merged.setdefault(tid, {"name": None, "conversations": 0, "users": 0})
@@ -150,35 +176,34 @@ def users(tenant_id: str, region: str | None = None, env: str = "uit") -> list[d
     # works regardless of which region the tenant is in. Regions that are unreachable — or whose
     # schema can't match this tenant_id (e.g. non-numeric id on a standard schema) — are skipped.
     merged: dict[str, dict] = {}
-    for label in _scan_labels(region, env):
-        try:
-            with _connect(label, env) as (c, sch):
-                if _platform_layout(c, sch):
-                    rows = c.execute(
-                        text(
-                            f'select conv.user_id, u.name as user_name, '
-                            f'case when u.admin then \'admin\' else null end role, count(*) conversations '
-                            f'from "{sch}".threads conv '
-                            f'left join "{sch}".users u on u.id = conv.user_id '
-                            f'where conv.tenant_id = :tid '
-                            f'group by conv.user_id, u.name, u.admin order by conversations desc'
-                        ),
-                        {"tid": tenant_id},
-                    ).mappings().all()
-                else:
-                    rows = c.execute(
-                        text(
-                            f'select conv.user_id, u.user_name, u.role, count(*) conversations '
-                            f'from "{sch}".conversations conv '
-                            f'left join "{sch}".users u '
-                            f'  on u.user_id = conv.user_id and u.tenant_id = conv.tenant_id '
-                            f'where conv.is_deleted = false and conv.tenant_id = :tid '
-                            f'group by conv.user_id, u.user_name, u.role order by conversations desc'
-                        ),
-                        {"tid": int(tenant_id)},
-                    ).mappings().all()
-        except Exception:  # noqa: BLE001 - region unreachable / tenant_id not valid here → skip
-            continue
+
+    def _one(label):
+        with _connect(label, env) as (c, sch):
+            if _platform_layout(c, sch):
+                return c.execute(
+                    text(
+                        f'select conv.user_id, u.name as user_name, '
+                        f'case when u.admin then \'admin\' else null end role, count(*) conversations '
+                        f'from "{sch}".threads conv '
+                        f'left join "{sch}".users u on u.id = conv.user_id '
+                        f'where conv.tenant_id = :tid '
+                        f'group by conv.user_id, u.name, u.admin order by conversations desc'
+                    ),
+                    {"tid": tenant_id},
+                ).mappings().all()
+            return c.execute(
+                text(
+                    f'select conv.user_id, u.user_name, u.role, count(*) conversations '
+                    f'from "{sch}".conversations conv '
+                    f'left join "{sch}".users u '
+                    f'  on u.user_id = conv.user_id and u.tenant_id = conv.tenant_id '
+                    f'where conv.is_deleted = false and conv.tenant_id = :tid '
+                    f'group by conv.user_id, u.user_name, u.role order by conversations desc'
+                ),
+                {"tid": int(tenant_id)},
+            ).mappings().all()
+
+    for rows in _map_regions(_scan_labels(region, env), _one):
         for r in rows:
             uid = str(r["user_id"])
             m = merged.setdefault(uid, {"user_name": None, "role": None, "conversations": 0})
@@ -229,12 +254,12 @@ def conversation_meta(ids: list[str], region: str | None = None, env: str = "uit
 
     labels = [region] if region else (region_labels(env) or [None])
     out: dict[str, dict] = {}
-    for label in labels:
-        try:
-            with _connect(label, env) as (c, sch):
-                rows = c.execute(_sql(sch, _platform_layout(c, sch)), {"ids": ids}).mappings().all()
-        except Exception:  # noqa: BLE001 - region unreachable (e.g. permission denied) → skip
-            continue
+
+    def _one(label):
+        with _connect(label, env) as (c, sch):
+            return label, c.execute(_sql(sch, _platform_layout(c, sch)), {"ids": ids}).mappings().all()
+
+    for label, rows in _map_regions(labels, _one):
         for r in rows:
             out.setdefault(
                 str(r["id"]),
@@ -263,46 +288,48 @@ def user_conversations(
     # A tenant/user lives in one region, but scan all when region is None so the drill-down
     # works regardless of which region owns them. Skip regions that are unreachable or whose
     # schema can't match this id (e.g. a non-numeric id on a classic schema).
+    def _one(label):
+        with _connect(label, env) as (c, sch):
+            if _platform_layout(c, sch):
+                params = {"tid": tenant_id, "uid": user_id, "limit": limit, "offset": offset}
+                n = int(c.execute(
+                    text(f'select count(*) from "{sch}".threads where tenant_id = :tid and user_id = :uid'),
+                    params,
+                ).scalar_one())
+                rs = c.execute(
+                    text(
+                        f'select thread.id, thread.title, thread.status, thread.updated_at last_message_at, '
+                        f'(select count(*) from "{sch}".thread_messages msg where msg.thread_id = thread.id) message_count '
+                        f'from "{sch}".threads thread where tenant_id = :tid and user_id = :uid '
+                        f'order by updated_at desc limit :limit offset :offset'
+                    ),
+                    params,
+                ).mappings().all()
+            else:
+                params = {"tid": int(tenant_id), "uid": int(user_id), "limit": limit, "offset": offset}
+                n = int(c.execute(
+                    text(
+                        f'select count(*) from "{sch}".conversations '
+                        f'where is_deleted = false and tenant_id = :tid and user_id = :uid'
+                    ),
+                    params,
+                ).scalar_one())
+                rs = c.execute(
+                    text(
+                        f'select id, title, status, last_message_at, message_count '
+                        f'from "{sch}".conversations '
+                        f'where is_deleted = false and tenant_id = :tid and user_id = :uid '
+                        f'order by last_message_at desc nulls last limit :limit offset :offset'
+                    ),
+                    params,
+                ).mappings().all()
+            return n, list(rs)
+
     rows: list = []
     total = 0
-    for label in _scan_labels(region, env):
-        try:
-            with _connect(label, env) as (c, sch):
-                if _platform_layout(c, sch):
-                    params = {"tid": tenant_id, "uid": user_id, "limit": limit, "offset": offset}
-                    total += int(c.execute(
-                        text(f'select count(*) from "{sch}".threads where tenant_id = :tid and user_id = :uid'),
-                        params,
-                    ).scalar_one())
-                    rows += c.execute(
-                        text(
-                            f'select thread.id, thread.title, thread.status, thread.updated_at last_message_at, '
-                            f'(select count(*) from "{sch}".thread_messages msg where msg.thread_id = thread.id) message_count '
-                            f'from "{sch}".threads thread where tenant_id = :tid and user_id = :uid '
-                            f'order by updated_at desc limit :limit offset :offset'
-                        ),
-                        params,
-                    ).mappings().all()
-                else:
-                    params = {"tid": int(tenant_id), "uid": int(user_id), "limit": limit, "offset": offset}
-                    total += int(c.execute(
-                        text(
-                            f'select count(*) from "{sch}".conversations '
-                            f'where is_deleted = false and tenant_id = :tid and user_id = :uid'
-                        ),
-                        params,
-                    ).scalar_one())
-                    rows += c.execute(
-                        text(
-                            f'select id, title, status, last_message_at, message_count '
-                            f'from "{sch}".conversations '
-                            f'where is_deleted = false and tenant_id = :tid and user_id = :uid '
-                            f'order by last_message_at desc nulls last limit :limit offset :offset'
-                        ),
-                        params,
-                    ).mappings().all()
-        except Exception:  # noqa: BLE001 - region unreachable / id not valid here → skip
-            continue
+    for n, rs in _map_regions(_scan_labels(region, env), _one):
+        total += n
+        rows += rs
     out = []
     for r in rows:
         cid = str(r["id"])

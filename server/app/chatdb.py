@@ -83,11 +83,22 @@ _EXPECTED_TABLES = ["conversations", "messages", "feedback", "token_usage"]
 _PLATFORM_TABLES = ["threads", "thread_messages"]
 
 
+_LAYOUT_CACHE: dict[str, bool] = {}  # (db url + schema) → is-platform-schema; layout is static
+
+
 def _platform_layout(connection, schema: str) -> bool:
-    return connection.execute(
+    """Whether the schema uses the platform (threads) layout. Cached per db+schema — the layout
+    never changes for the life of the process, so this saves a round-trip on every dashboard call."""
+    key = f"{connection.engine.url}|{schema}"
+    cached = _LAYOUT_CACHE.get(key)
+    if cached is not None:
+        return cached
+    result = bool(connection.execute(
         text("select to_regclass(:relation) is not null"),
         {"relation": f"{schema}.threads"},
-    ).scalar_one()
+    ).scalar_one())
+    _LAYOUT_CACHE[key] = result
+    return result
 
 
 def region_labels(env: str = "uit") -> list[str]:

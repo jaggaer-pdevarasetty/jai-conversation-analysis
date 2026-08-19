@@ -57,18 +57,30 @@ def _eligible_by_region(
     """{region_label: eligible ids} for an environment. One region if given, else all configured.
     When `feedback_only`, restrict to conversations that have user feedback (PROD 'feedback'
     scope). A region that errors (e.g. permission denied) is skipped so it can't block others."""
+    from concurrent.futures import ThreadPoolExecutor
+
     from .chatdb import _eligible_in_region, configured_regions, resolve_region
 
-    regions = [resolve_region(region, env)] if region else configured_regions(env)
+    regions = [r for r in ([resolve_region(region, env)] if region else configured_regions(env)) if r is not None]
     out: dict[str, list[str]] = {}
-    for r in regions:
-        if r is None:
-            continue
-        try:
-            out[r.label] = _eligible_in_region(r, None, None, feedback_only=feedback_only)
-        except Exception as exc:  # noqa: BLE001 - one bad region must not stop the rest
-            print(f"[warn] eligibility skipped region '{r.label}': {type(exc).__name__}", flush=True)
-            out[r.label] = []
+    if not regions:
+        return out
+
+    def _one(r):
+        return r.label, _eligible_in_region(r, None, None, feedback_only=feedback_only)
+
+    # Regions are independent remote chat DBs → query them concurrently (the eligibility scan can
+    # be slow), skipping any that error so one bad region can't stop the rest.
+    with ThreadPoolExecutor(max_workers=min(len(regions), 6)) as pool:
+        futures = {pool.submit(_one, r): r for r in regions}
+        for fut in futures:
+            r = futures[fut]
+            try:
+                label, ids = fut.result()
+                out[label] = ids
+            except Exception as exc:  # noqa: BLE001 - one bad region must not stop the rest
+                print(f"[warn] eligibility skipped region '{r.label}': {type(exc).__name__}", flush=True)
+                out[r.label] = []
     return out
 
 
@@ -127,6 +139,19 @@ if settings.source == "chatdb":
     # (POST /analyze/sweep, per-conversation analyse). No boot sweep, no scheduled cadence.
     analysis_queue.start()
     latest_run = run_analysis(store, [], analyze_batch=make_batch_analyzer())  # empty summary
+
+    def _warm_dashboard() -> None:
+        # Pre-open the dashboard connection pool + cache the schema-layout probe for every
+        # env/region so the FIRST overview/feedback request isn't paying cold-connection cost.
+        from . import dashboard
+
+        for _e in settings.environments():
+            try:
+                dashboard.overview(store, env=_e)
+            except Exception:  # noqa: BLE001 - best-effort warmup; never crash startup
+                pass
+
+    threading.Thread(target=_warm_dashboard, name="warmup", daemon=True).start()
 else:
     # fixtures / langsmith: seed synchronously so the pooled list is populated immediately.
     latest_run = run_analysis(store, _load_source(), analyze_batch=make_batch_analyzer())
