@@ -49,6 +49,12 @@ function metric(value: number | null, suffix = ""): string {
   return value === null || value === undefined ? "Unavailable" : `${value.toLocaleString()}${suffix}`;
 }
 
+/** input + output across the whole conversation. "Unavailable" only when both are missing. */
+function totalTokens(input: number | null, output: number | null): string {
+  if ((input ?? null) === null && (output ?? null) === null) return "Unavailable";
+  return ((input ?? 0) + (output ?? 0)).toLocaleString();
+}
+
 function roleLabel(role: string): string {
   if (role === "assistant") return "JAI Assistant";
   if (role === "live_agent") return "Live agent";
@@ -253,7 +259,7 @@ export function FeedbackConversationDetail({
               <Metric label="TTFT" value={metric(detail.metrics.ttft_ms, " ms")} icon={<AccessTimeRoundedIcon sx={{ fontSize: 16 }} />} />
               <Metric label="Input tokens" value={metric(detail.metrics.input_tokens)} icon={<BoltRoundedIcon sx={{ fontSize: 16 }} />} />
               <Metric label="Output tokens" value={metric(detail.metrics.output_tokens)} icon={<BoltRoundedIcon sx={{ fontSize: 16 }} />} />
-              <Metric label="Prompt tokens" value={metric(detail.metrics.prompt_tokens)} icon={<BoltRoundedIcon sx={{ fontSize: 16 }} />} />
+              <Metric label="Total tokens" value={totalTokens(detail.metrics.input_tokens, detail.metrics.output_tokens)} icon={<BoltRoundedIcon sx={{ fontSize: 16 }} />} />
             </Box>
           </Paper>
         </Stack>

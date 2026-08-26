@@ -45,6 +45,9 @@ describe("ConversationDetail", () => {
     expect(screen.getByText("How do I reset my password?")).toBeInTheDocument();
     expect(screen.getByLabelText("Time to first token")).toHaveTextContent("11.4 s");
     expect(screen.getByLabelText("Input tokens")).toHaveTextContent("35,293");
+    // Total tokens = input + output (replaces the redundant "Prompt tokens" card).
+    expect(screen.getByLabelText("Total tokens")).toHaveTextContent("41,479");
+    expect(screen.queryByLabelText("Prompt tokens")).not.toBeInTheDocument();
     expect(screen.getByText("The user repeated the same question.")).toBeInTheDocument();
     expect(screen.getByText("Settings").tagName).toBe("STRONG");
     expect(screen.getByRole("list")).toBeInTheDocument();

@@ -39,6 +39,12 @@ function metric(value: number | null): string {
   return value === null || value === undefined ? "unavailable" : value.toLocaleString();
 }
 
+/** input + output across the whole conversation. "unavailable" only when both are missing. */
+function totalTokens(input: number | null, output: number | null): string {
+  if ((input ?? null) === null && (output ?? null) === null) return "unavailable";
+  return ((input ?? 0) + (output ?? 0)).toLocaleString();
+}
+
 function latency(value: number | null): string {
   if (value === null || value === undefined) return "unavailable";
   return value < 1000 ? `${value} ms` : `${(value / 1000).toFixed(1)} s`;
@@ -224,7 +230,7 @@ export function ConversationDetail({ id, initial }: { id: string; initial?: Deta
               <MetricCard label="Time to first token" value={latency(m.ttft_ms)} icon={<AccessTimeRoundedIcon sx={{ fontSize: 16 }} />} />
               <MetricCard label="Input tokens" value={metric(m.input_tokens)} icon={<BoltRoundedIcon sx={{ fontSize: 16 }} />} />
               <MetricCard label="Output tokens" value={metric(m.output_tokens)} icon={<BoltRoundedIcon sx={{ fontSize: 16 }} />} />
-              <MetricCard label="Prompt tokens" value={metric(m.prompt_tokens)} icon={<BoltRoundedIcon sx={{ fontSize: 16 }} />} />
+              <MetricCard label="Total tokens" value={totalTokens(m.input_tokens, m.output_tokens)} icon={<BoltRoundedIcon sx={{ fontSize: 16 }} />} />
             </Box>
           </Paper>
 
