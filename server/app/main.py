@@ -196,6 +196,13 @@ def _last_message_at(conv: CommonConversation | None) -> str | None:
     return value.replace(" ", "T", 1) if value else None
 
 
+def _has_thumbs(conv: CommonConversation | None) -> bool:
+    """True if ANY feedback in the chat carries a thumb rating (multi-feedback aware, ADR-0022)."""
+    if conv is None:
+        return False
+    return conv.feedback.rating is not None or any(f.rating is not None for f in conv.feedbacks)
+
+
 def _list_item(record: AnalysisRecord, conv: CommonConversation | None) -> dict:
     return {
         "conversation_id": record.conversation_id,
@@ -205,7 +212,7 @@ def _list_item(record: AnalysisRecord, conv: CommonConversation | None) -> dict:
         "confidence": record.confidence,
         "status": record.status,
         "overridden": record.override is not None,
-        "has_feedback": bool(conv and conv.feedback.rating is not None),
+        "has_feedback": _has_thumbs(conv),
         "metrics": _metrics(record),
         "last_message_at": _last_message_at(conv),
         "analyzed_at": record.analyzed_at,
@@ -380,6 +387,11 @@ def _conversation_detail(conversation_id: str, env: str = "uit") -> dict | None:
             for m in conv.messages
         ],
         "feedback": {"rating": conv.feedback.rating, "comment": conv.feedback.comment},
+        # ALL feedback in the chat, each tied to its turn/message (ADR-0022).
+        "feedbacks": [
+            {"rating": f.rating, "comment": f.comment, "message_id": f.message_id}
+            for f in conv.feedbacks
+        ],
     }
 
 
@@ -401,6 +413,7 @@ def feedback_conversations(
     env: str | None = Query(default=None),
     rating: str | None = Query(default=None, pattern="^(positive|negative)$"),
     category: str | None = Query(default=None),
+    root_cause: str | None = Query(default=None, max_length=40),
     query: str | None = Query(default=None, max_length=200),
     tenant: str | None = Query(default=None, max_length=200),
     date_range: str | None = Query(default=None, pattern="^(last_7_days|last_30_days)$"),
@@ -429,7 +442,7 @@ def feedback_conversations(
     conversations = store.get_conversations([record.conversation_id for record in records], env)
     for record in records:
         conv = conversations.get(record.conversation_id)
-        has_thumbs = conv is not None and conv.feedback.rating is not None
+        has_thumbs = _has_thumbs(conv)
         neg_outcome = record.category in _NEGATIVE_CATEGORIES
         if scope == "thumbs" and not has_thumbs:
             continue
@@ -447,10 +460,15 @@ def feedback_conversations(
                 "confidence": record.confidence,
                 "rating": conv.feedback.rating if conv else None,
                 "comment": conv.feedback.comment if conv else None,
+                "feedbacks": [
+                    {"rating": f.rating, "comment": f.comment, "message_id": f.message_id}
+                    for f in (conv.feedbacks if conv else [])
+                ],
                 "has_thumbs": has_thumbs,
                 "recommended_next_step": record.recommended_next_step,
                 "rationale": record.rationale,
                 "why_it_happened": (deep or {}).get("why_it_happened", ""),
+                "root_cause": (deep or {}).get("root_cause", ""),
                 "input_tokens": m.input_tokens,
                 "output_tokens": m.output_tokens,
                 "last_message_at": _last_message_at(conv),
@@ -470,6 +488,8 @@ def feedback_conversations(
         items = [item for item in items if item["rating"] is expected]
     if category:
         items = [item for item in items if item["category"] == category]
+    if root_cause:  # drill-in from the Insights groups view
+        items = [item for item in items if item.get("root_cause") == root_cause]
 
     # enrich with source metadata (tenant/user/title/timestamps) so the UI can show a table
     def _enrich(rows):
@@ -554,6 +574,83 @@ def feedback_conversations(
         "limit": limit,
         "offset": offset,
     }
+
+
+_ROOT_CAUSE_LABELS = {
+    "knowledge_gap": "Knowledge gap (right document not retrieved)",
+    "wrong_document_retrieved": "Wrong documents retrieved",
+    "wrong_routing": "Wrong routing / out of scope",
+    "ambiguous_question": "Ambiguous question",
+    "tool_error": "Tool / system error",
+    "missing_tenant_rule": "Missing tenant rule",
+    "other": "Other",
+}
+
+
+def _record_root_cause(record: AnalysisRecord) -> str:
+    """Root-cause label for a record: the LLM label if present, else derived from safe signals."""
+    if record.deep and record.deep.root_cause:
+        return record.deep.root_cause
+    e = record.enrichment
+    if e is not None:
+        if e.retrieval_hit is False:
+            return "knowledge_gap"
+        if e.had_error is True:
+            return "tool_error"
+        if (e.guardrail or "").lower() in ("reject", "refusal", "handoff"):
+            return "wrong_routing"
+    return "other"
+
+
+@api.get("/groups")
+def root_cause_groups(
+    scope: str = Query(default="issues", pattern="^(issues|all)$"),
+    region: str | None = Query(default=None),
+    env: str | None = Query(default=None),
+):
+    """Group conversations by root cause and rank by impact (ADR-0022).
+
+    scope=issues (default): conversations that went badly — any thumbs feedback OR a negative
+        outcome (failed_to_resolve / negative_feedback). scope=all: every analysed conversation.
+    Impact counts are aggregate only: conversations, distinct tenants (tenant_id), and distinct
+    users (one-way user_hash pseudonym). No tenant/user identity is returned.
+    """
+    env = _env(env)
+    if (bad := _bad_region(region, env)) is not None:
+        return bad
+    records = store.list(region=region, env=env)
+    conversations = store.get_conversations([r.conversation_id for r in records], env)
+    groups: dict[str, dict] = {}
+    for record in records:
+        conv = conversations.get(record.conversation_id)
+        include = scope == "all" or _has_thumbs(conv) or record.category in _NEGATIVE_CATEGORIES
+        if not include:
+            continue
+        rc = _record_root_cause(record)
+        g = groups.setdefault(rc, {"ids": [], "tenants": set(), "users": set(), "step": ""})
+        g["ids"].append(record.conversation_id)
+        if record.tenant_id:
+            g["tenants"].add(record.tenant_id)
+        if record.user_hash:
+            g["users"].add(record.user_hash)
+        step = record.recommended_next_step
+        if not g["step"] and step and step != "No action needed.":
+            g["step"] = step
+    items = [
+        {
+            "root_cause": rc,
+            "label": _ROOT_CAUSE_LABELS.get(rc, rc),
+            "knowledge_gap": rc == "knowledge_gap",
+            "conversations": len(g["ids"]),
+            "tenants": len(g["tenants"]),
+            "users": len(g["users"]),
+            "sample_conversation_ids": g["ids"][:5],
+            "example_next_step": g["step"],
+        }
+        for rc, g in groups.items()
+    ]
+    items.sort(key=lambda x: (x["conversations"], x["users"], x["tenants"]), reverse=True)
+    return {"items": items, "total": len(items), "scope": scope}
 
 
 @api.get("/feedback/export")

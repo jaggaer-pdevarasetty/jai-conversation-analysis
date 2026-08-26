@@ -2,6 +2,24 @@
 
 _Last updated: 2026-08-21_
 
+## Multi-feedback capture + root-cause/knowledge-gap grouping (ADR-0022) — feat/insights-multi-feedback
+- **Capture ALL feedback per conversation** (was one): `feedbacks: list[Feedback]` on Conversation/
+  CommonConversation (additive; single `feedback` kept as primary). chatdb collects every feedback +
+  carries `user_id`; de-id scrubs the list; store rehydrates with back-compat (no migration). The deep
+  (Tier-2) analysis now sees all feedback. Verified live: `ba596973` shows **both** the supplier and
+  the "services" feedback (previously only one).
+- **Root cause + grouping:** structured `root_cause` enum on DeepAnalysis (LLM label, deterministic
+  knowledge-gap fallback from retrieval-miss). New `GET /api/analysis/groups` buckets records by root
+  cause with **conversations + tenants + distinct-users** impact counts, ranked. Users counted via a
+  one-way `user_hash` pseudonym on AnalysisRecord — aggregate only, no raw identity (ADR-0007/0022).
+- **UI:** new **Insights** nav page (impact-ranked groups → drill into the feedback list filtered by
+  root cause); feedback detail highlights **every** rated turn; root-cause chip on the analysis panel.
+- Tests: server `test_multi_feedback.py` (9) + client `InsightsPage.test.tsx` (2); all suites green.
+- Note: existing records need a **re-analysis** to populate feedbacks/user_hash/root_cause (old rows
+  keep working via back-compat defaults; user counts read 0 until re-analysed).
+
+_Earlier: 2026-08-21 (two-tier analysis / ADR-0021)_
+
 ## Two-tier analysis + richer LangSmith evidence (ADR-0021) — feat/two-tier-analysis
 - Formalised **Tier 1 (standard, all convos)** + **Tier 2 (aggressive/feedback)**. Tier 2 now
   feeds the **PII-scrubbed retrieved-doc snippets + the actual invocation prompt** into the deep

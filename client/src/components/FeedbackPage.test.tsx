@@ -14,6 +14,10 @@ jest.mock("./RegionContext", () => ({
   useRegion: () => ({ region: "us", loading: false }),
 }));
 
+jest.mock("next/navigation", () => ({
+  useSearchParams: () => new URLSearchParams(),
+}));
+
 const response: FeedbackListResponse = {
   items: [{
     conversation_id: "4512ec35-9164-4225-a7eb-06c1a26cf652",

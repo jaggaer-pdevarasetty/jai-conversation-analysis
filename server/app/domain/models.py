@@ -65,7 +65,9 @@ class Conversation:
     title: Optional[str]
     created_at: str
     messages: list[Message]
-    feedback: Feedback
+    feedback: Feedback  # primary feedback (first / most-significant) — kept for back-compat
+    feedbacks: list[Feedback] = field(default_factory=list)  # ALL feedback in the chat (ADR-0022)
+    user_id: str = ""  # source-side only; pseudonymised before it reaches the common store
     region: str = ""  # source region label (us/eu/uk) — carried through to the record
     environment: str = "uit"  # source environment (uit/prod) — carried through to the record
     # Hints sourced from LangSmith (router intent / frustration) in production.
@@ -139,6 +141,7 @@ class DeepAnalysis:
     how_to_avoid: str = ""
     suggestions: str = ""
     user_remark: str = ""  # the user's own feedback comment, verbatim (de-identified)
+    root_cause: str = ""  # structured root-cause label for grouping (ADR-0022) — enum, no PII
 
 
 # ── Common side (pooled area; conversation_id only, de-identified) ───────────
@@ -158,6 +161,8 @@ class AnalysisRecord:
     region: str = ""  # which regional source this came from (us/eu/uk) — for analytics
     environment: str = "uit"  # which environment this came from (uit/prod) — strict isolation
     tenant_id: str = ""  # kept for tenant analytics (a company, not a person)
+    user_hash: str = ""  # one-way pseudonym of the source user (ADR-0022) — for distinct-user
+    #                      impact counts only; non-reversible, never resolves to a user
     override: Optional[Override] = None
     deep: Optional[DeepAnalysis] = None  # populated only when the conversation has feedback
     enrichment: Optional[Enrichment] = None  # safe/scrubbed orchestrator + LangSmith signals
@@ -174,8 +179,9 @@ class CommonConversation:
 
     conversation_id: str
     messages: list[Message]
-    feedback: Feedback
+    feedback: Feedback  # primary feedback (first / most-significant) — kept for back-compat
     environment: str = "uit"  # env this transcript belongs to (uit/prod) — strict isolation
+    feedbacks: list[Feedback] = field(default_factory=list)  # ALL feedback in the chat (ADR-0022)
 
 
 @dataclass

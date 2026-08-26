@@ -278,10 +278,11 @@ def _load_platform_region(
         Conversation(
             id=str(row["id"]),
             tenant_id=str(row["tenant_id"] or ""),
+            user_id=str(row["user_id"] or ""),
             title=row["title"],
             created_at=str(row["created_at"]) if row["created_at"] else "",
             messages=messages_by_thread.get(str(row["id"]), []),
-            feedback=Feedback(),
+            feedback=Feedback(),  # platform feedback not available in thread_messages
             region=region.label,
             environment=env,
         )
@@ -373,7 +374,7 @@ def _load_region(
         cid = str(r["id"])
         rows = msgs_by_conv.get(cid, [])
         messages: list[Message] = []
-        conv_feedback = Feedback()
+        feedbacks: list[Feedback] = []  # ALL feedback in the chat, in message order (ADR-0022)
         for m in rows:
             mid = str(m["id"])
             u = usage_by_msg.get(mid)
@@ -401,17 +402,23 @@ def _load_region(
                 )
             )
             fb = fb_by_msg.get(mid)
-            if fb and conv_feedback.rating is None:
-                conv_feedback = Feedback(rating=fb["rating"], comment=fb["comment"], message_id=mid)
+            if fb:
+                feedbacks.append(Feedback(rating=fb["rating"], comment=fb["comment"], message_id=mid))
 
+        # Primary feedback (back-compat): the first negative thumb if any, else the first feedback.
+        primary = next(
+            (f for f in feedbacks if f.rating is False), feedbacks[0] if feedbacks else Feedback()
+        )
         conversations.append(
             Conversation(
                 id=cid,
                 tenant_id=str(r["tenant_id"]) if r["tenant_id"] is not None else "",
+                user_id=str(r["user_id"]) if r["user_id"] is not None else "",
                 title=r["title"],
                 created_at=str(r["created_at"]) if r["created_at"] else "",
                 messages=messages,
-                feedback=conv_feedback,
+                feedback=primary,
+                feedbacks=feedbacks,
                 region=region.label,  # tag the source region → flows into the analysis record
                 environment=env,  # tag the source environment → strict isolation in the store
             )

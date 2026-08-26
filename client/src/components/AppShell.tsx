@@ -7,6 +7,7 @@ import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined";
 import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import MenuRoundedIcon from "@mui/icons-material/MenuRounded";
 import ThumbsUpDownOutlinedIcon from "@mui/icons-material/ThumbsUpDownOutlined";
+import TroubleshootRoundedIcon from "@mui/icons-material/TroubleshootRounded";
 import {
   AppBar,
   Box,
@@ -44,6 +45,7 @@ const NAV = [
   { href: "/", label: "Overview", icon: <DashboardRoundedIcon /> },
   { href: "/tenants", label: "Tenants", icon: <BusinessRoundedIcon /> },
   { href: "/feedback", label: "Feedback", icon: <ThumbsUpDownOutlinedIcon /> },
+  { href: "/insights", label: "Insights", icon: <TroubleshootRoundedIcon /> },
   { href: "/conversations", label: "Review queue", icon: <FactCheckOutlinedIcon /> },
 ];
 
@@ -88,7 +90,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const isActive = (href: string) => (href === "/" ? overviewView : pathname.startsWith(href));
   const pageTitle = overviewView
     ? "Overview"
-    : pathname.startsWith("/feedback/")
+    : pathname.startsWith("/insights")
+      ? "Insights"
+      : pathname.startsWith("/feedback/")
       ? "Feedback review"
       : pathname === "/feedback"
         ? "User feedback"
