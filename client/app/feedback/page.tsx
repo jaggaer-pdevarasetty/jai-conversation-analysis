@@ -87,6 +87,9 @@ export default function FeedbackPage() {
     setError(null);
     fetchFeedback({
       region,
+      // Drill-in from Insights: widen to the same set the groups are computed over (thumbs OR
+      // negative outcomes) so a root-cause group actually shows its conversations.
+      scope: rootCause ? "all" : undefined,
       rating,
       category,
       root_cause: rootCause,

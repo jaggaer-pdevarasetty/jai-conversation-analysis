@@ -468,7 +468,9 @@ def feedback_conversations(
                 "recommended_next_step": record.recommended_next_step,
                 "rationale": record.rationale,
                 "why_it_happened": (deep or {}).get("why_it_happened", ""),
-                "root_cause": (deep or {}).get("root_cause", ""),
+                # Same derivation as the /groups endpoint (LLM label OR deterministic fallback) so
+                # the Insights drill-in (?root_cause=…) matches the group it came from.
+                "root_cause": _record_root_cause(record),
                 "input_tokens": m.input_tokens,
                 "output_tokens": m.output_tokens,
                 "last_message_at": _last_message_at(conv),
