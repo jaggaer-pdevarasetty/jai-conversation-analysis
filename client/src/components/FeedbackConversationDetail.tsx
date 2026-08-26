@@ -35,6 +35,7 @@ import {
   type Message,
 } from "../services/analysisApi";
 import { CategoryChip } from "./CategoryChip";
+import { EnrichmentPanel } from "./EnrichmentPanel";
 import { MarkdownContent } from "./MarkdownContent";
 
 function formatDate(value?: string | null): string {
@@ -225,6 +226,8 @@ export function FeedbackConversationDetail({
               </Stack>
             ) : <Alert severity="info" sx={{ mt: 2 }}>Deep analysis is not available in the API response yet.</Alert>}
           </Paper>
+
+          <EnrichmentPanel enrichment={detail.enrichment} />
 
           <Paper sx={{ p: 2.5 }}>
             <Typography variant="h3">Recommended action</Typography>

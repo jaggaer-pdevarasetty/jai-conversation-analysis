@@ -62,6 +62,13 @@ class Settings:
     orch_profile_enabled: bool = os.getenv("ORCH_PROFILE_ENABLED", "true").lower() == "true"
     # Cap on LangSmith traces fetched per conversation (bounds cost/latency).
     enrichment_max_runs: int = int(os.getenv("ENRICHMENT_MAX_RUNS", "20"))
+    # Richer evidence (ADR-0021). Snippets = retrieved-doc text; prompt = the actual invocation
+    # prompt (Tier-2 / feedback only). Both are PII/quasi-id scrubbed + secret-stripped + size
+    # bounded before they are stored or shown. Secrets (JWT/URLs/app_context) are NEVER read.
+    enrich_snippets: bool = os.getenv("ENRICH_SNIPPETS", "true").lower() == "true"
+    enrich_prompt: bool = os.getenv("ENRICH_PROMPT", "true").lower() == "true"
+    snippet_max_chars: int = int(os.getenv("SNIPPET_MAX_CHARS", "400"))
+    prompt_max_chars: int = int(os.getenv("PROMPT_MAX_CHARS", "4000"))
 
     # Conversation source: "fixtures" (samples) | "chatdb" (REAL, canonical) | "langsmith".
     source: str = os.getenv("SOURCE", "fixtures")

@@ -1,6 +1,21 @@
 # Progress
 
-_Last updated: 2026-08-11_
+_Last updated: 2026-08-21_
+
+## Two-tier analysis + richer LangSmith evidence (ADR-0021) — feat/two-tier-analysis
+- Formalised **Tier 1 (standard, all convos)** + **Tier 2 (aggressive/feedback)**. Tier 2 now
+  feeds the **PII-scrubbed retrieved-doc snippets + the actual invocation prompt** into the deep
+  root-cause pass so it can judge whether the RIGHT documents were retrieved (the rmaddox case).
+- Enrichment extended: `retrieved_snippets` + `invocation_prompt` (feedback only). Everything is
+  **URL + PII/quasi-id scrubbed + size bounded**; secrets (JWT/app_context/URLs) are still never
+  read. Compliance guard test extended (`test_enrichment.py`); LangSmith 15-day window respected.
+- UI: new **EnrichmentPanel** shows the agent's signals + **its own reasoning ("what it was
+  thinking")** + documents used on every conversation, and the snippets + scrubbed prompt on the
+  feedback view. Tests: server 4 new, client `EnrichmentPanel.test.tsx` (3). All suites green.
+- **Next stage (not in this PR):** capture ALL feedback per conversation (today one is kept, so
+  multi-turn feedback like rmaddox's 2nd comment is missed) + root-cause / knowledge-gap grouping.
+
+_Earlier: 2026-08-11_
 
 ## Current state
 **Working prototype scaffold, tests green on both sides**, running on mock fixtures.

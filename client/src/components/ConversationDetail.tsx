@@ -31,6 +31,7 @@ import {
   overrideCategory,
 } from "../services/analysisApi";
 import { CATEGORY_META, CategoryChip, categoryLabel } from "./CategoryChip";
+import { EnrichmentPanel } from "./EnrichmentPanel";
 import { MarkdownContent } from "./MarkdownContent";
 
 /** AC-7: missing telemetry shows "unavailable", never 0. */
@@ -235,6 +236,8 @@ export function ConversationDetail({ id, initial }: { id: string; initial?: Deta
             <Typography variant="body2" sx={{ fontWeight: 750, mt: 1.6 }}>{feedbackLabel(detail.feedback.rating)}</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{detail.feedback.comment || "No written feedback was provided."}</Typography>
           </Paper>
+
+          <EnrichmentPanel enrichment={detail.enrichment} />
 
           <Paper aria-label="Override" sx={{ p: 2.5 }}>
             <Typography variant="h3">Decision & audit</Typography>

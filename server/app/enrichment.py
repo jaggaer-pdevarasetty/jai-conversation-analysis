@@ -14,11 +14,15 @@ Hard rules:
 from __future__ import annotations
 
 import json
+import re
 
 from .config import settings
 from .domain.models import Enrichment
 from .http import client as make_client
 from .pii import redact
+
+# Strip URLs before storing/showing (compliance: no internal/service URLs survive — ADR-0021).
+_URL = re.compile(r"https?://\S+", re.IGNORECASE)
 
 # Cache ONLY successful resolutions — a transient failure must not disable enrichment for the
 # life of the process (negative results are retried on the next call).
@@ -57,33 +61,48 @@ def _project_id(name: str, env: str = "uit") -> str | None:
     return None
 
 
-def fetch_enrichment(conversation_id: str, region: str, env: str = "uit") -> Enrichment | None:
-    """Fetch + build safe enrichment for one conversation, or None. Never raises."""
+def _query_runs(hc, project_id: str, conversation_id: str, env: str, extra: dict) -> list[dict]:
+    """POST /runs/query for one conversation with the given extra filters. [] on any failure."""
+    body = {
+        "session": [project_id],
+        # LangSmith filter DSL: match metadata via has(metadata, '{"k": "v"}') — the JSON literal is
+        # single-quoted (nested metadata_key("..") quoting is rejected by the parser).
+        "filter": "has(metadata, '%s')" % json.dumps({"conversation_id": conversation_id}),
+        "limit": settings.enrichment_max_runs,
+        **extra,
+    }
+    try:
+        r = hc.post(f"{settings.langsmith_base_url}/runs/query", headers=_headers(env), json=body)
+        return r.json().get("runs", []) if r.status_code == 200 else []
+    except Exception:  # noqa: BLE001 - best-effort; never break analysis
+        return []
+
+
+def fetch_enrichment(
+    conversation_id: str, region: str, env: str = "uit", with_prompt: bool = False
+) -> Enrichment | None:
+    """Fetch + build safe enrichment for one conversation, or None. Never raises.
+
+    with_prompt (Tier-2 / feedback) additionally pulls the actual invocation prompt from the LLM
+    child runs — PII/quasi-id scrubbed + size bounded before it is stored (ADR-0021)."""
     if not settings.enrichment_enabled or not settings.langsmith_api_key_for(env) or not conversation_id:
         return None
     project_id = _project_id(settings.langsmith_project_for(region, env), env)
     if not project_id:
         return None
-    # LangSmith filter DSL: match metadata via has(metadata, '{"k": "v"}') — the JSON literal is
-    # single-quoted (nested metadata_key("..") quoting is rejected by the parser).
-    body = {
-        "session": [project_id],
-        "filter": "has(metadata, '%s')" % json.dumps({"conversation_id": conversation_id}),
-        "is_root": True,  # per-turn top-level state runs (they carry intent/citations/reasoning)
-        "limit": settings.enrichment_max_runs,
-        "order": "asc",
-    }
     hc = make_client()
     try:
-        r = hc.post(f"{settings.langsmith_base_url}/runs/query", headers=_headers(env), json=body)
-        if r.status_code != 200:
+        # per-turn top-level state runs (they carry intent/citations/reasoning + snippets)
+        runs = _query_runs(hc, project_id, conversation_id, env, {"is_root": True, "order": "asc"})
+        if not runs:
             return None
-        runs = r.json().get("runs", [])
-    except Exception:  # noqa: BLE001 - best-effort; never break analysis
-        return None
+        e = build_enrichment(runs)
+        if with_prompt and settings.enrich_prompt:
+            llm_runs = _query_runs(hc, project_id, conversation_id, env, {"run_type": "llm", "order": "desc"})
+            e.invocation_prompt = build_invocation_prompt(llm_runs)
+        return e
     finally:
         hc.close()
-    return build_enrichment(runs) if runs else None
 
 
 def _tag_value(tags: list, prefix: str) -> str | None:
@@ -94,7 +113,8 @@ def _tag_value(tags: list, prefix: str) -> str | None:
 
 
 def _scrub(value) -> str:
-    return redact(value) if isinstance(value, str) and value.strip() else ""
+    """Strip URLs, then PII + quasi-identifiers. The single boundary for free text we store/show."""
+    return redact(_URL.sub("[url]", value)) if isinstance(value, str) and value.strip() else ""
 
 
 def build_enrichment(runs: list[dict]) -> Enrichment:
@@ -105,6 +125,7 @@ def build_enrichment(runs: list[dict]) -> Enrichment:
     resp_types: list[str] = []
     confidences: list[str] = []
     docs: list[str] = []
+    snippets: list[str] = []
     reasoning_bits: list[str] = []
     frustrations: list[float] = []
     errors: list[bool] = []
@@ -134,7 +155,12 @@ def build_enrichment(runs: list[dict]) -> Enrichment:
             confidences.append(str(conf).replace("ConfidenceLevel.", ""))
         for c in (out.get("citations") or ins.get("citations") or []):
             if isinstance(c, dict) and c.get("file_name"):
-                docs.append(str(c["file_name"])[:160])  # doc identifier only, never the snippet
+                docs.append(str(c["file_name"])[:160])  # doc identifier
+            # Snippet = retrieved doc TEXT (ADR-0021): PII/quasi-id scrubbed + bounded before storing.
+            if settings.enrich_snippets and isinstance(c, dict) and c.get("snippet"):
+                snip = _scrub(str(c["snippet"]))[: settings.snippet_max_chars]
+                if snip:
+                    snippets.append(snip)
         reasoning = ins.get("reasoning") or out.get("reasoning")
         if reasoning:
             reasoning_bits.append(_scrub(str(reasoning)))
@@ -155,6 +181,7 @@ def build_enrichment(runs: list[dict]) -> Enrichment:
     uniq_docs = list(dict.fromkeys(docs))
     e.retrieved_docs = uniq_docs[:10]
     e.retrieved_count = len(uniq_docs)
+    e.retrieved_snippets = list(dict.fromkeys(snippets))[:10]  # scrubbed, deduped, bounded
     e.retrieval_hit = (e.retrieved_count > 0) if used_rag else None
     e.reasoning_summary = " ".join(b for b in reasoning_bits if b)[:600]
     e.frustration_score = max(frustrations) if frustrations else None
@@ -163,3 +190,46 @@ def build_enrichment(runs: list[dict]) -> Enrichment:
         e.guardrail = e.response_type
     e.turns = e.turns or len(runs)
     return e
+
+
+def _prompt_text_from_run(run: dict) -> str:
+    """Best-effort: assemble the prompt text from an LLM run's inputs (messages / prompts).
+
+    Reads ONLY inputs (never run.extra, where the JWT lives). Content may be a string or a list
+    of parts ({"text": ...})."""
+    ins = run.get("inputs") or {}
+    chunks: list[str] = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            role = node.get("role") or node.get("type") or ""
+            content = node.get("content")
+            if isinstance(content, str):
+                chunks.append(f"{role}: {content}" if role else content)
+            elif isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and isinstance(part.get("text"), str):
+                        chunks.append(part["text"])
+                    elif isinstance(part, str):
+                        chunks.append(part)
+        elif isinstance(node, list):
+            for x in node:
+                walk(x)
+        elif isinstance(node, str):
+            chunks.append(node)
+
+    walk(ins.get("messages"))
+    for p in ins.get("prompts") or []:
+        if isinstance(p, str):
+            chunks.append(p)
+    return "\n".join(c for c in chunks if c)
+
+
+def build_invocation_prompt(llm_runs: list[dict]) -> str:
+    """Pick the richest LLM prompt across runs, then scrub (URLs + PII) + size-bound. Pure."""
+    best = ""
+    for run in llm_runs:
+        text = _prompt_text_from_run(run)
+        if len(text) > len(best):
+            best = text
+    return _scrub(best)[: settings.prompt_max_chars]

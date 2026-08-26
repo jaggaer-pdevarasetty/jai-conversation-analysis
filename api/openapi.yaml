@@ -322,7 +322,9 @@ components:
       type: object
       description: >-
         Safe, PII/quasi-identifier-scrubbed signals from the JAI orchestrator + LangSmith traces
-        (ADR-0018). No secrets (JWT/keys/URLs) or raw identifiers are ever included.
+        (ADR-0018/0021). No secrets (JWT/keys/URLs) or raw identifiers are ever included.
+        retrieved_snippets + invocation_prompt are URL/PII scrubbed + size bounded; the prompt is
+        populated only for conversations WITH feedback (Tier-2). All are within LangSmith's 15-day window.
       properties:
         intent: { type: [string, 'null'] }
         secondary_intent: { type: [string, 'null'] }
@@ -332,6 +334,8 @@ components:
         retrieval_hit: { type: [boolean, 'null'] }
         retrieved_count: { type: integer }
         retrieved_docs: { type: array, items: { type: string } }
+        retrieved_snippets: { type: array, items: { type: string } }
+        invocation_prompt: { type: string }
         reasoning_summary: { type: string }
         frustration_score: { type: [number, 'null'] }
         guardrail: { type: [string, 'null'] }

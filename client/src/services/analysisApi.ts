@@ -98,6 +98,26 @@ export interface DeepAnalysis {
   user_remark: string;
 }
 
+/** Safe, PII-scrubbed signals from the JAI orchestrator + LangSmith trace (ADR-0018/0021). */
+export interface Enrichment {
+  intent: string | null;
+  secondary_intent: string | null;
+  agent_used: string | null;
+  response_type: string | null;
+  source_confidence: string | null;
+  retrieval_hit: boolean | null;
+  retrieved_count: number;
+  retrieved_docs: string[];
+  retrieved_snippets: string[];
+  invocation_prompt: string;
+  reasoning_summary: string;
+  frustration_score: number | null;
+  guardrail: string | null;
+  had_error: boolean | null;
+  turns: number | null;
+  langsmith_found: boolean;
+}
+
 export interface ConversationSource {
   tenant_id?: string | null;
   tenant_name?: string | null;
@@ -127,6 +147,7 @@ export interface ConversationDetail {
     analyzer_version?: string;
   };
   deep: DeepAnalysis | null;
+  enrichment?: Enrichment | null;
   metrics: Metrics;
   messages: Message[];
   feedback: { rating: boolean | null; comment: string | null; message_id?: string | null };
