@@ -111,9 +111,11 @@ def enrich(convs: list[Conversation]) -> None:
     for c in convs:
         if c.enrichment is not None or not c.region:
             continue
-        # Tier-2 (feedback) also pulls the PII-scrubbed invocation prompt (ADR-0021).
-        has_feedback = c.feedback.rating is not None or bool(c.feedback.comment)
-        e = fetch_enrichment(c.id, c.region, c.environment, with_prompt=has_feedback)
+        # Tier-2 = conversations with an explicit thumb rating (the only case deep_analyze runs, so
+        # the only case the prompt + snippets are consumed). Gate the extra fetch on the SAME
+        # condition to avoid a wasted LLM-run query for comment-only conversations (ADR-0021).
+        tier2 = c.feedback.rating is not None
+        e = fetch_enrichment(c.id, c.region, c.environment, with_prompt=tier2)
         if e is None:
             continue
         c.enrichment = e

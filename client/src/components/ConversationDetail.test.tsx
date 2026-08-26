@@ -58,6 +58,12 @@ describe("ConversationDetail", () => {
     expect(screen.queryByText(/\*\*Settings\*\*/)).not.toBeInTheDocument();
   });
 
+  it("shows Total tokens as unavailable when one half is missing (never substitutes 0)", () => {
+    const partial = { ...record, metrics: { ...record.metrics, output_tokens: null } };
+    render(<ConversationDetail id="abc123" initial={partial} />);
+    expect(screen.getByLabelText("Total tokens")).toHaveTextContent("unavailable");
+  });
+
   it("renders Markdown safely during server-side rendering", () => {
     const consoleError = jest.spyOn(console, "error").mockImplementation(() => undefined);
     try {

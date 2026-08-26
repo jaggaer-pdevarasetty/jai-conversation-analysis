@@ -96,13 +96,34 @@ def fetch_enrichment(
         runs = _query_runs(hc, project_id, conversation_id, env, {"is_root": True, "order": "asc"})
         if not runs:
             return None
-        e = build_enrichment(runs)
+        e = build_enrichment(runs, with_snippets=with_prompt)  # snippets are Tier-2 (feedback) only
         if with_prompt and settings.enrich_prompt:
-            llm_runs = _query_runs(hc, project_id, conversation_id, env, {"run_type": "llm", "order": "desc"})
-            e.invocation_prompt = build_invocation_prompt(llm_runs)
+            # Fetch the invocation prompt from LLM child runs, filtered by the root TRACE ids —
+            # trace_id always propagates to children, unlike optional conversation_id metadata.
+            trace_ids = [t for r in runs if (t := r.get("trace_id"))]
+            e.invocation_prompt = build_invocation_prompt(_query_llm_by_traces(hc, project_id, trace_ids, env))
         return e
     finally:
         hc.close()
+
+
+def _query_llm_by_traces(hc, project_id: str, trace_ids: list[str], env: str) -> list[dict]:
+    """LLM child runs across the given traces. Uses trace_id (always present on children) so the
+    prompt fetch is robust even if conversation_id metadata is stamped only on root runs. [] on failure."""
+    tids = [t for t in trace_ids if t][: settings.enrichment_max_runs]
+    if not tids:
+        return []
+    clauses = ", ".join('eq(trace_id, "%s")' % t for t in tids)
+    filt = "or(%s)" % clauses if len(tids) > 1 else clauses
+    body = {
+        "session": [project_id], "filter": filt, "run_type": "llm",
+        "limit": settings.enrichment_max_runs, "order": "desc",
+    }
+    try:
+        r = hc.post(f"{settings.langsmith_base_url}/runs/query", headers=_headers(env), json=body)
+        return r.json().get("runs", []) if r.status_code == 200 else []
+    except Exception:  # noqa: BLE001 - best-effort; never break analysis
+        return []
 
 
 def _tag_value(tags: list, prefix: str) -> str | None:
@@ -117,8 +138,12 @@ def _scrub(value) -> str:
     return redact(_URL.sub("[url]", value)) if isinstance(value, str) and value.strip() else ""
 
 
-def build_enrichment(runs: list[dict]) -> Enrichment:
-    """Aggregate a conversation's runs into one safe Enrichment. Pure — unit-testable."""
+def build_enrichment(runs: list[dict], with_snippets: bool = True) -> Enrichment:
+    """Aggregate a conversation's runs into one safe Enrichment. Pure — unit-testable.
+
+    with_snippets gates retrieved-document snippets to Tier-2 (feedback) conversations (ADR-0021),
+    so the stored PII surface is not widened to every conversation. Doc file NAMES are always kept
+    (low-risk identifiers)."""
     e = Enrichment(langsmith_found=True)
     intents: list[str] = []
     agents: set[str] = set()
@@ -156,8 +181,8 @@ def build_enrichment(runs: list[dict]) -> Enrichment:
         for c in (out.get("citations") or ins.get("citations") or []):
             if isinstance(c, dict) and c.get("file_name"):
                 docs.append(str(c["file_name"])[:160])  # doc identifier
-            # Snippet = retrieved doc TEXT (ADR-0021): PII/quasi-id scrubbed + bounded before storing.
-            if settings.enrich_snippets and isinstance(c, dict) and c.get("snippet"):
+            # Snippet = retrieved doc TEXT (ADR-0021): Tier-2 only, PII/quasi-id scrubbed + bounded.
+            if with_snippets and settings.enrich_snippets and isinstance(c, dict) and c.get("snippet"):
                 snip = _scrub(str(c["snippet"]))[: settings.snippet_max_chars]
                 if snip:
                     snippets.append(snip)

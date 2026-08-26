@@ -64,6 +64,16 @@ def test_no_secret_or_pii_survives():
     assert "[email]" in e.reasoning_summary or "[id]" in e.reasoning_summary or "[amount]" in e.reasoning_summary
 
 
+def test_snippets_are_tier2_only():
+    # Tier-1 (with_snippets=False): keep doc NAMES (low-risk) but store NO snippet text,
+    # so the PII surface is not widened to every conversation (ADR-0021 review fix).
+    e1 = build_enrichment([DIRTY_RUN], with_snippets=False)
+    assert e1.retrieved_docs and e1.retrieved_snippets == []
+    # Tier-2 (default): snippets captured (and scrubbed).
+    e2 = build_enrichment([DIRTY_RUN])
+    assert e2.retrieved_snippets
+
+
 def test_invocation_prompt_scrubbed_and_bounded():
     # The actual LLM prompt (ADR-0021) may carry URLs + PII + the retrieved context. It must be
     # URL/PII scrubbed before we store it, and never expose secrets.

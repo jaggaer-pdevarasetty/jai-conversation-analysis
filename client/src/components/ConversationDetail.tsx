@@ -39,10 +39,11 @@ function metric(value: number | null): string {
   return value === null || value === undefined ? "unavailable" : value.toLocaleString();
 }
 
-/** input + output across the whole conversation. "unavailable" only when both are missing. */
+/** input + output across the whole conversation. AC-7: if EITHER half is missing the total is
+ * unknowable, so show "unavailable" (never substitute 0, which would understate it). */
 function totalTokens(input: number | null, output: number | null): string {
-  if ((input ?? null) === null && (output ?? null) === null) return "unavailable";
-  return ((input ?? 0) + (output ?? 0)).toLocaleString();
+  if (input === null || input === undefined || output === null || output === undefined) return "unavailable";
+  return (input + output).toLocaleString();
 }
 
 function latency(value: number | null): string {
