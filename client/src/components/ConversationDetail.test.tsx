@@ -40,17 +40,28 @@ describe("ConversationDetail", () => {
   beforeEach(() => fetchConversationMock.mockReset().mockResolvedValue(record));
   it("shows transcript, review evidence, confidence and formatted metrics", async () => {
     render(<ConversationDetail id="abc123" initial={record} />);
+    // Recommended action panel (mirrors the feedback view) holds the step + rationale.
+    expect(screen.getByLabelText("Recommended action")).toBeInTheDocument();
     expect(screen.getByText("Improve the password-reset answer.")).toBeInTheDocument();
     expect(screen.getByText("High confidence")).toBeInTheDocument();
     expect(screen.getByText("How do I reset my password?")).toBeInTheDocument();
     expect(screen.getByLabelText("Time to first token")).toHaveTextContent("11.4 s");
     expect(screen.getByLabelText("Input tokens")).toHaveTextContent("35,293");
+    // Total tokens = input + output (replaces the redundant "Prompt tokens" card).
+    expect(screen.getByLabelText("Total tokens")).toHaveTextContent("41,479");
+    expect(screen.queryByLabelText("Prompt tokens")).not.toBeInTheDocument();
     expect(screen.getByText("The user repeated the same question.")).toBeInTheDocument();
     expect(screen.getByText("Settings").tagName).toBe("STRONG");
     expect(screen.getByRole("list")).toBeInTheDocument();
     expect(screen.getByRole("table")).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Requisition Number" })).toBeInTheDocument();
     expect(screen.queryByText(/\*\*Settings\*\*/)).not.toBeInTheDocument();
+  });
+
+  it("shows Total tokens as unavailable when one half is missing (never substitutes 0)", () => {
+    const partial = { ...record, metrics: { ...record.metrics, output_tokens: null } };
+    render(<ConversationDetail id="abc123" initial={partial} />);
+    expect(screen.getByLabelText("Total tokens")).toHaveTextContent("unavailable");
   });
 
   it("renders Markdown safely during server-side rendering", () => {

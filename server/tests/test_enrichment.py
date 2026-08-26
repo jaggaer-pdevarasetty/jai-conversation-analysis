@@ -1,7 +1,7 @@
-"""LangSmith enrichment: extract only SAFE fields; never leak JWT/URLs/PII (ADR-0018)."""
+"""LangSmith enrichment: extract only SAFE fields; never leak JWT/URLs/PII (ADR-0018/0021)."""
 
 from app import enrichment
-from app.enrichment import build_enrichment, fetch_enrichment
+from app.enrichment import build_enrichment, build_invocation_prompt, fetch_enrichment
 
 # A realistic LangSmith run that INCLUDES the dangerous stuff we must never surface.
 JWT = "eyJhbGciOiJSUzI1NiJ9.eyJ0ZW5hbnRfaWQiOiIyMDAyMDAwMDgwOCJ9.sig"
@@ -47,6 +47,8 @@ def test_extracts_safe_signals():
     assert e.retrieved_docs and "assign-approver" in e.retrieved_docs[0]
     assert e.had_error is False
     assert e.langsmith_found is True
+    # ADR-0021: snippet captured, but scrubbed (the email in it is gone).
+    assert e.retrieved_snippets and "[email]" in e.retrieved_snippets[0]
 
 
 def test_no_secret_or_pii_survives():
@@ -60,6 +62,55 @@ def test_no_secret_or_pii_survives():
         assert leak not in blob, f"{leak!r} leaked into enrichment"
     # the reasoning is still present, just scrubbed
     assert "[email]" in e.reasoning_summary or "[id]" in e.reasoning_summary or "[amount]" in e.reasoning_summary
+
+
+def test_snippets_are_tier2_only():
+    # Tier-1 (with_snippets=False): keep doc NAMES (low-risk) but store NO snippet text,
+    # so the PII surface is not widened to every conversation (ADR-0021 review fix).
+    e1 = build_enrichment([DIRTY_RUN], with_snippets=False)
+    assert e1.retrieved_docs and e1.retrieved_snippets == []
+    # Tier-2 (default): snippets captured (and scrubbed).
+    e2 = build_enrichment([DIRTY_RUN])
+    assert e2.retrieved_snippets
+
+
+def test_invocation_prompt_scrubbed_and_bounded():
+    # The actual LLM prompt (ADR-0021) may carry URLs + PII + the retrieved context. It must be
+    # URL/PII scrubbed before we store it, and never expose secrets.
+    dirty_llm_run = {
+        "run_type": "llm",
+        "inputs": {
+            "messages": [[
+                {"role": "system", "content": "Answer only from context. See https://internal.example/x"},
+                {"role": "user", "content": "email me at john.doe@ucsc.edu about req 12345678"},
+            ]],
+        },
+    }
+    prompt = build_invocation_prompt([dirty_llm_run])
+    assert prompt, "prompt should be extracted"
+    assert "https://" not in prompt and "internal.example" not in prompt
+    assert "[url]" in prompt
+    assert "john.doe@ucsc.edu" not in prompt and "12345678" not in prompt
+    # the useful instruction text survives
+    assert "Answer only from context" in prompt
+    # empty / no-llm-runs is safe
+    assert build_invocation_prompt([]) == ""
+
+
+def test_invocation_prompt_handles_langchain_serialized_messages():
+    # Real LangSmith LLM runs serialize messages as {"id":[...,"SystemMessage"],"kwargs":{"content":...}}.
+    lc_run = {
+        "run_type": "llm",
+        "inputs": {"messages": [[
+            {"id": ["langchain", "schema", "messages", "SystemMessage"],
+             "kwargs": {"content": "Use only the provided context to answer."}, "lc": 1, "type": "constructor"},
+            {"id": ["langchain", "schema", "messages", "HumanMessage"],
+             "kwargs": {"content": "what form for a service?"}, "lc": 1, "type": "constructor"},
+        ]]},
+    }
+    prompt = build_invocation_prompt([lc_run])
+    assert "Use only the provided context" in prompt
+    assert "what form for a service?" in prompt
 
 
 def test_fetch_disabled_returns_none():

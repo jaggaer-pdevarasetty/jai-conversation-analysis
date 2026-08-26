@@ -35,6 +35,7 @@ import {
   type Message,
 } from "../services/analysisApi";
 import { CategoryChip } from "./CategoryChip";
+import { EnrichmentPanel } from "./EnrichmentPanel";
 import { MarkdownContent } from "./MarkdownContent";
 
 function formatDate(value?: string | null): string {
@@ -46,6 +47,13 @@ function formatDate(value?: string | null): string {
 
 function metric(value: number | null, suffix = ""): string {
   return value === null || value === undefined ? "Unavailable" : `${value.toLocaleString()}${suffix}`;
+}
+
+/** input + output across the whole conversation. AC-7: if EITHER half is missing the total is
+ * unknowable, so show "Unavailable" (never substitute 0, which would understate it). */
+function totalTokens(input: number | null, output: number | null): string {
+  if (input === null || input === undefined || output === null || output === undefined) return "Unavailable";
+  return (input + output).toLocaleString();
 }
 
 function roleLabel(role: string): string {
@@ -226,6 +234,8 @@ export function FeedbackConversationDetail({
             ) : <Alert severity="info" sx={{ mt: 2 }}>Deep analysis is not available in the API response yet.</Alert>}
           </Paper>
 
+          <EnrichmentPanel enrichment={detail.enrichment} />
+
           <Paper sx={{ p: 2.5 }}>
             <Typography variant="h3">Recommended action</Typography>
             <Box sx={{ mt: 1.25, p: 1.6, bgcolor: "#FFF6F1", borderRadius: 2.5, borderLeft: "4px solid", borderColor: "primary.main" }}><MarkdownContent>{detail.analysis.recommended_next_step}</MarkdownContent></Box>
@@ -240,6 +250,7 @@ export function FeedbackConversationDetail({
               <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">User</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right", overflowWrap: "anywhere" }}>{source?.user_name || "Unavailable"}</Typography></Box>
               <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">Created</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right" }}>{formatDate(source?.created_at)}</Typography></Box>
               <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">Last message</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right" }}>{formatDate(source?.last_message_at)}</Typography></Box>
+              <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">Analysed</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right" }}>{formatDate(detail.analysis.analyzed_at)}</Typography></Box>
               <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">Analyzer</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right", overflowWrap: "anywhere" }}>{detail.analysis.analyzer_version || "Unavailable"}</Typography></Box>
             </Stack>
           </Paper>
@@ -250,7 +261,7 @@ export function FeedbackConversationDetail({
               <Metric label="TTFT" value={metric(detail.metrics.ttft_ms, " ms")} icon={<AccessTimeRoundedIcon sx={{ fontSize: 16 }} />} />
               <Metric label="Input tokens" value={metric(detail.metrics.input_tokens)} icon={<BoltRoundedIcon sx={{ fontSize: 16 }} />} />
               <Metric label="Output tokens" value={metric(detail.metrics.output_tokens)} icon={<BoltRoundedIcon sx={{ fontSize: 16 }} />} />
-              <Metric label="Prompt tokens" value={metric(detail.metrics.prompt_tokens)} icon={<BoltRoundedIcon sx={{ fontSize: 16 }} />} />
+              <Metric label="Total tokens" value={totalTokens(detail.metrics.input_tokens, detail.metrics.output_tokens)} icon={<BoltRoundedIcon sx={{ fontSize: 16 }} />} />
             </Box>
           </Paper>
         </Stack>

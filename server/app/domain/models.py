@@ -101,7 +101,9 @@ class Enrichment:
     retrieval_hit: Optional[bool] = None    # did the knowledge base return any docs?
     retrieved_count: int = 0
     retrieved_docs: list[str] = field(default_factory=list)  # doc file names (identifiers)
-    reasoning_summary: str = ""             # scrubbed + truncated agent reasoning
+    retrieved_snippets: list[str] = field(default_factory=list)  # PII-scrubbed doc snippets (ADR-0021)
+    invocation_prompt: str = ""             # PII-scrubbed actual invocation prompt (Tier-2 / feedback; ADR-0021)
+    reasoning_summary: str = ""             # scrubbed + truncated agent reasoning ("model thinking")
     frustration_score: Optional[float] = None
     guardrail: Optional[str] = None         # refusal/handoff/guardrail note
     had_error: Optional[bool] = None
