@@ -195,23 +195,32 @@ def build_enrichment(runs: list[dict]) -> Enrichment:
 def _prompt_text_from_run(run: dict) -> str:
     """Best-effort: assemble the prompt text from an LLM run's inputs (messages / prompts).
 
-    Reads ONLY inputs (never run.extra, where the JWT lives). Content may be a string or a list
-    of parts ({"text": ...})."""
+    Reads ONLY inputs (never run.extra, where the JWT lives). Handles both plain messages
+    ({"role","content"}) and LangChain-serialized ones ({"id":[...,"SystemMessage"],
+    "kwargs":{"content": ...}}); content may be a string or a list of parts ({"text": ...})."""
     ins = run.get("inputs") or {}
     chunks: list[str] = []
 
+    def add(content, role: str = ""):
+        if isinstance(content, str) and content.strip():
+            chunks.append(f"{role}: {content}" if role else content)
+        elif isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and isinstance(part.get("text"), str):
+                    chunks.append(part["text"])
+                elif isinstance(part, str):
+                    chunks.append(part)
+
     def walk(node):
         if isinstance(node, dict):
-            role = node.get("role") or node.get("type") or ""
-            content = node.get("content")
-            if isinstance(content, str):
-                chunks.append(f"{role}: {content}" if role else content)
-            elif isinstance(content, list):
-                for part in content:
-                    if isinstance(part, dict) and isinstance(part.get("text"), str):
-                        chunks.append(part["text"])
-                    elif isinstance(part, str):
-                        chunks.append(part)
+            kwargs = node.get("kwargs")
+            if isinstance(kwargs, dict) and "content" in kwargs:  # LangChain-serialized message
+                idp = node.get("id")
+                role = str(idp[-1]).replace("Message", "").lower() if isinstance(idp, list) and idp else ""
+                add(kwargs.get("content"), role)
+            else:
+                role = node.get("role") or node.get("type") or ""
+                add(node.get("content"), role if isinstance(role, str) else "")
         elif isinstance(node, list):
             for x in node:
                 walk(x)

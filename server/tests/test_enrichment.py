@@ -87,6 +87,22 @@ def test_invocation_prompt_scrubbed_and_bounded():
     assert build_invocation_prompt([]) == ""
 
 
+def test_invocation_prompt_handles_langchain_serialized_messages():
+    # Real LangSmith LLM runs serialize messages as {"id":[...,"SystemMessage"],"kwargs":{"content":...}}.
+    lc_run = {
+        "run_type": "llm",
+        "inputs": {"messages": [[
+            {"id": ["langchain", "schema", "messages", "SystemMessage"],
+             "kwargs": {"content": "Use only the provided context to answer."}, "lc": 1, "type": "constructor"},
+            {"id": ["langchain", "schema", "messages", "HumanMessage"],
+             "kwargs": {"content": "what form for a service?"}, "lc": 1, "type": "constructor"},
+        ]]},
+    }
+    prompt = build_invocation_prompt([lc_run])
+    assert "Use only the provided context" in prompt
+    assert "what form for a service?" in prompt
+
+
 def test_fetch_disabled_returns_none():
     # No LangSmith key configured in tests → enrichment is off → None, never a network call.
     assert fetch_enrichment("some-id", "us") is None
