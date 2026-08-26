@@ -165,11 +165,6 @@ export function ConversationDetail({ id, initial }: { id: string; initial?: Deta
             <Chip size="small" label={a.status === "analysed" ? "Analysis complete" : a.status} icon={<CheckCircleRoundedIcon />} sx={{ bgcolor: "#F2F4F7" }} />
           </Stack>
         </Box>
-
-        <Box sx={{ mt: 2.5, p: 2.25, borderRadius: 2.5, bgcolor: "#FFF6F1", borderLeft: "4px solid", borderColor: "primary.main" }}>
-          <Typography variant="overline" color="primary.dark">Recommended next step</Typography>
-          <Box sx={{ mt: 0.35, fontWeight: 700 }}><MarkdownContent>{a.recommended_next_step}</MarkdownContent></Box>
-        </Box>
       </Paper>
 
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "minmax(0, 1.55fr) minmax(340px, .72fr)" }, gap: 2.5, alignItems: "start" }}>
@@ -209,16 +204,19 @@ export function ConversationDetail({ id, initial }: { id: string; initial?: Deta
         </Paper>
 
         <Stack spacing={2.5} sx={{ position: { lg: "sticky" }, top: { lg: 96 } }}>
+          <Paper aria-label="Recommended action" sx={{ p: 2.5 }}>
+            <Typography variant="h3">Recommended action</Typography>
+            <Box sx={{ mt: 1.25, p: 1.6, bgcolor: "#FFF6F1", borderRadius: 2.5, borderLeft: "4px solid", borderColor: "primary.main", fontWeight: 700 }}><MarkdownContent>{a.recommended_next_step}</MarkdownContent></Box>
+            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.5 }}>Model rationale</Typography>
+            <Box sx={{ mt: 0.35, fontSize: 14 }}><MarkdownContent>{a.rationale || "No model rationale was provided."}</MarkdownContent></Box>
+          </Paper>
+
           <Paper aria-label="Analysis" sx={{ p: 2.5 }}>
             <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
               <PsychologyOutlinedIcon color="primary" />
-              <Typography variant="h3">Review evidence</Typography>
+              <Typography variant="h3">Detected signals</Typography>
             </Box>
-            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 2 }}>Why this category was assigned</Typography>
-            <Box sx={{ mt: 0.6, fontSize: 14 }}><MarkdownContent>{a.rationale || "No model rationale was provided."}</MarkdownContent></Box>
-            <Divider sx={{ my: 2 }} />
-            <Typography variant="caption" color="text.secondary">Detected signals</Typography>
-            <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+            <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 2 }}>
               {activeSignals.length ? activeSignals.map((signal) => <Chip key={signal} size="small" label={signal} variant="outlined" />) : <Typography variant="body2" color="text.secondary">No deterministic risk signals detected.</Typography>}
             </Stack>
           </Paper>
@@ -252,6 +250,7 @@ export function ConversationDetail({ id, initial }: { id: string; initial?: Deta
               <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">Effective category</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right" }}>{categoryLabel(a.category)}</Typography></Box>
               <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">Analyzer</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right", overflowWrap: "anywhere" }}>{a.analyzer_version || "Not available"}</Typography></Box>
               <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">Run ID</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right", overflowWrap: "anywhere" }}>{a.run_id || "Not available"}</Typography></Box>
+              <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">Analysed</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right" }}>{formatDate(a.analyzed_at)}</Typography></Box>
               {a.override && <Alert severity="warning" sx={{ mt: 0.5 }}>Overridden by {a.override.actor} on {formatDate(a.override.at)}</Alert>}
             </Stack>
             <Divider sx={{ my: 2.25 }} />

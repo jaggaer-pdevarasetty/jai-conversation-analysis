@@ -40,6 +40,8 @@ describe("ConversationDetail", () => {
   beforeEach(() => fetchConversationMock.mockReset().mockResolvedValue(record));
   it("shows transcript, review evidence, confidence and formatted metrics", async () => {
     render(<ConversationDetail id="abc123" initial={record} />);
+    // Recommended action panel (mirrors the feedback view) holds the step + rationale.
+    expect(screen.getByLabelText("Recommended action")).toBeInTheDocument();
     expect(screen.getByText("Improve the password-reset answer.")).toBeInTheDocument();
     expect(screen.getByText("High confidence")).toBeInTheDocument();
     expect(screen.getByText("How do I reset my password?")).toBeInTheDocument();
