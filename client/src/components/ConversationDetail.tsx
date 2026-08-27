@@ -31,6 +31,7 @@ import {
   overrideCategory,
 } from "../services/analysisApi";
 import { CATEGORY_META, CategoryChip, categoryLabel } from "./CategoryChip";
+import { EABadge } from "./EABadge";
 import { EnrichmentPanel } from "./EnrichmentPanel";
 import { MarkdownContent } from "./MarkdownContent";
 
@@ -225,6 +226,7 @@ export function ConversationDetail({ id, initial }: { id: string; initial?: Deta
           {detail.source && (
             <Paper aria-label="Conversation context" sx={{ p: 2.5 }}>
               <Typography variant="h3">Conversation context</Typography>
+              {detail.source.ea && <Box sx={{ mt: 1.25 }}><EABadge ea={detail.source.ea} /></Box>}
               <Stack spacing={1.15} sx={{ mt: 2 }}>
                 <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">Tenant</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right" }}>{detail.source.tenant_name || "Unavailable"}</Typography></Box>
                 <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">User</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right", overflowWrap: "anywhere" }}>{detail.source.user_name || "Unavailable"}</Typography></Box>

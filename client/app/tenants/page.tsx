@@ -5,22 +5,27 @@ import BusinessRoundedIcon from "@mui/icons-material/BusinessRounded";
 import ForumOutlinedIcon from "@mui/icons-material/ForumOutlined";
 import GroupsOutlinedIcon from "@mui/icons-material/GroupsOutlined";
 import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
+import StarRoundedIcon from "@mui/icons-material/StarRounded";
 import {
   Alert,
   AlertTitle,
   Avatar,
   Box,
   Button,
+  Chip,
+  FormControlLabel,
   InputAdornment,
   Paper,
   Skeleton,
   Stack,
+  Switch,
   TablePagination,
   TextField,
   Typography,
 } from "@mui/material";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { EABadge } from "../../src/components/EABadge";
 import { useRegion } from "../../src/components/RegionContext";
 import { StatCard } from "../../src/components/StatCard";
 import { fetchTenants, type Tenant } from "../../src/services/dashboardApi";
@@ -28,6 +33,7 @@ import { fetchTenants, type Tenant } from "../../src/services/dashboardApi";
 export default function TenantsPage() {
   const [tenants, setTenants] = useState<Tenant[] | null>(null);
   const [search, setSearch] = useState("");
+  const [eaOnly, setEaOnly] = useState(false);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(12);
   const [error, setError] = useState<string | null>(null);
@@ -45,9 +51,12 @@ export default function TenantsPage() {
 
   const filteredTenants = useMemo(() => {
     const query = search.trim().toLowerCase();
-    if (!query) return tenants ?? [];
-    return (tenants ?? []).filter((tenant) => tenant.name.toLowerCase().includes(query) || tenant.tenant_id.toLowerCase().includes(query));
-  }, [search, tenants]);
+    return (tenants ?? []).filter((tenant) => {
+      if (eaOnly && !tenant.ea) return false;
+      if (!query) return true;
+      return tenant.name.toLowerCase().includes(query) || tenant.tenant_id.toLowerCase().includes(query);
+    });
+  }, [search, eaOnly, tenants]);
   const visibleTenants = filteredTenants.slice(page * rowsPerPage, (page + 1) * rowsPerPage);
 
   if (error) {
@@ -73,6 +82,7 @@ export default function TenantsPage() {
 
   const userCount = tenants.reduce((total, tenant) => total + tenant.users, 0);
   const conversationCount = tenants.reduce((total, tenant) => total + tenant.conversations, 0);
+  const eaCount = tenants.filter((tenant) => tenant.ea).length;
 
   return (
     <Stack spacing={3}>
@@ -84,21 +94,26 @@ export default function TenantsPage() {
         </Typography>
       </Box>
 
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(3, 1fr)" }, gap: 2 }}>
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", lg: "repeat(4, 1fr)" }, gap: 2 }}>
         <StatCard label="Tenants" value={tenants.length.toLocaleString()} helper="Organisations in the authorised view" icon={<BusinessRoundedIcon />} />
+        <StatCard label="Early Access" value={eaCount.toLocaleString()} helper="EA customers in this view" icon={<StarRoundedIcon />} tone="#E4511E" />
         <StatCard label="Users" value={userCount.toLocaleString()} helper="Distinct users across tenants" icon={<GroupsOutlinedIcon />} tone="#356BB3" />
         <StatCard label="Conversations" value={conversationCount.toLocaleString()} helper="Available source conversations" icon={<ForumOutlinedIcon />} tone="#16815D" />
       </Box>
 
-      <Paper sx={{ p: 2 }}>
+      <Paper sx={{ p: 2, display: "flex", gap: 2, alignItems: "center", flexWrap: "wrap" }}>
         <TextField
-          fullWidth
           size="small"
           label="Search tenants"
           placeholder="Tenant name or ID"
           value={search}
           onChange={(event) => { setSearch(event.target.value); setPage(0); }}
+          sx={{ flex: 1, minWidth: 260 }}
           InputProps={{ startAdornment: <InputAdornment position="start"><SearchRoundedIcon fontSize="small" /></InputAdornment> }}
+        />
+        <FormControlLabel
+          control={<Switch checked={eaOnly} onChange={(event) => { setEaOnly(event.target.checked); setPage(0); }} />}
+          label="Early Access only"
         />
       </Paper>
 
@@ -127,9 +142,12 @@ export default function TenantsPage() {
                 "&:focus-visible": { outline: "3px solid", outlineColor: "primary.light", outlineOffset: 2 },
               }}
             >
-              <Avatar sx={{ width: 48, height: 48, bgcolor: "#FFF0E9", color: "primary.main" }}><BusinessRoundedIcon /></Avatar>
+              <Avatar sx={{ width: 48, height: 48, bgcolor: tenant.ea ? "#FDEBE3" : "#FFF0E9", color: "primary.main" }}>{tenant.ea ? <StarRoundedIcon /> : <BusinessRoundedIcon />}</Avatar>
               <Box sx={{ minWidth: 0 }}>
-                <Typography variant="h3" sx={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tenant.name}</Typography>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+                  <Typography variant="h3" sx={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tenant.name}</Typography>
+                  <EABadge ea={tenant.ea} />
+                </Box>
                 <Typography variant="caption" color="text.secondary">Tenant ID {tenant.tenant_id}</Typography>
                 <Stack direction="row" spacing={2.5} sx={{ mt: 1.5 }}>
                   <Box><Typography variant="body2" sx={{ fontWeight: 750 }}>{tenant.users.toLocaleString()}</Typography><Typography variant="caption" color="text.secondary">Users</Typography></Box>

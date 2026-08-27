@@ -36,6 +36,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CATEGORIES, fetchFeedback, type FeedbackItem, type FeedbackListResponse } from "../../src/services/analysisApi";
 import { CATEGORY_META, CategoryChip } from "../../src/components/CategoryChip";
 import { DownloadFeedbackButton } from "../../src/components/DownloadFeedbackButton";
+import { EABadge } from "../../src/components/EABadge";
 import { MarkdownContent } from "../../src/components/MarkdownContent";
 import { useRegion } from "../../src/components/RegionContext";
 import { StatCard } from "../../src/components/StatCard";
@@ -285,6 +286,7 @@ export default function FeedbackPage() {
                 <TableCell sx={{ width: 210 }}>
                   <Typography variant="body2" sx={{ fontWeight: 700 }}>{item.tenant_name || "Tenant unavailable"}</Typography>
                   <Typography variant="caption" color="text.secondary" sx={{ display: "block", overflowWrap: "anywhere" }}>{item.user_name || "User unavailable"}</Typography>
+                  {item.ea && <Box sx={{ mt: 0.75 }}><EABadge ea={item.ea} /></Box>}
                 </TableCell>
                 <TableCell sx={{ width: 180 }}>
                   <CategoryChip category={item.category} />

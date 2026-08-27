@@ -18,11 +18,20 @@ export interface RegionInfo {
   counts: Record<string, number>;
   error: string | null;
 }
+export interface EAInfo {
+  key: string;
+  label: string;
+  product: string; // JI / JA
+  status: string; // active / blocked
+  privacy: string; // non-empty => privacy/compliance-sensitive (e.g. ENEL RoPA/ISO 42001)
+  privacy_sensitive: boolean;
+}
 export interface Tenant {
   tenant_id: string;
   name: string;
   conversations: number;
   users: number;
+  ea?: EAInfo | null; // Early Access customer badge (mirrors Confluence roster)
 }
 export interface TenantUser {
   user_id: string;

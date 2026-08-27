@@ -21,6 +21,7 @@ from functools import lru_cache
 from sqlalchemy import bindparam, text
 
 from .chatdb import _engine_for, _platform_layout, region_labels, resolve_region, safe_schema
+from .ea_customers import ea_info
 from .store import CommonStore
 
 
@@ -161,9 +162,10 @@ def tenants(region: str | None = None, env: str = "uit") -> list[dict]:
     out = [
         {
             "tenant_id": tid,
-            "name": m["name"] or f"Tenant {tid}",
+            "name": (name := m["name"] or f"Tenant {tid}"),
             "conversations": m["conversations"],
             "users": m["users"],
+            "ea": ea_info(name),  # Early Access badge (mirrors Confluence roster); None otherwise
         }
         for tid, m in merged.items()
     ]
@@ -267,7 +269,8 @@ def conversation_meta(ids: list[str], region: str | None = None, env: str = "uit
                     {
                         "region": label,
                         "tenant_id": str(r["tenant_id"]) if r["tenant_id"] is not None else None,
-                        "tenant_name": r["tenant_name"] or (f"Tenant {r['tenant_id']}" if r["tenant_id"] else None),
+                        "tenant_name": (tn := r["tenant_name"] or (f"Tenant {r['tenant_id']}" if r["tenant_id"] else None)),
+                        "ea": ea_info(tn),  # Early Access badge on the reviewer/feedback views
                         "user_id": str(r["user_id"]) if r["user_id"] is not None else None,
                         "user_name": r["user_name"] or (f"User {r['user_id']}" if r["user_id"] else None),
                         "title": r["title"],
