@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { fetchPending, triggerSweep } from "../services/analysisApi";
+import { fetchPending, triggerSweep, type PendingResponse } from "../services/analysisApi";
 import { AnalyzeNowButton } from "./AnalyzeNowButton";
 
 jest.mock("../services/analysisApi", () => ({
@@ -21,8 +21,9 @@ describe("AnalyzeNowButton", () => {
     mockTrigger.mockReset();
   });
 
-  it("UIT: fetches, shows count + a Start button, then analyses on Start", async () => {
-    mockFetch.mockResolvedValue({
+  it("UIT: fetches, shows the total/feedback/normal breakdown + a Start button, then analyses on Start", async () => {
+    const feedbackPending: PendingResponse = { count: 1, ids: ["a"], by_region: { us: 1 }, items: [] };
+    const allPending: PendingResponse = {
       count: 3,
       ids: ["a", "b", "c"],
       by_region: { us: 2, eu: 1 },
@@ -31,14 +32,21 @@ describe("AnalyzeNowButton", () => {
         { conversation_id: "b", region: "us", tenant_name: "ShopBlue", title: "Invoices", last_message_at: null },
         { conversation_id: "c", region: "eu", tenant_name: "Hitachi", title: "Suppliers", last_message_at: null },
       ],
-    });
+    };
+    mockFetch.mockImplementation((_region, scope) =>
+      Promise.resolve(scope === "feedback" ? feedbackPending : allPending),
+    );
     mockTrigger.mockResolvedValue("started");
     render(<AnalyzeNowButton />);
 
     await userEvent.click(screen.getByRole("button", { name: /analyze/i }));
-    expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(mockFetch).toHaveBeenCalledWith("", "all");
+    expect(mockFetch).toHaveBeenCalledWith("", "feedback");
     expect(await screen.findByText(/new \/ unanalyzed conversation/i)).toBeInTheDocument();
+    // breakdown: total 3, new feedback 1, normal 2
+    expect(screen.getByText("Total 3")).toBeInTheDocument();
+    expect(screen.getByText("New feedback 1")).toBeInTheDocument();
+    expect(screen.getByText("Normal 2")).toBeInTheDocument();
     expect(screen.getByText("US: 2")).toBeInTheDocument();
     expect(screen.getByText("Approvals")).toBeInTheDocument();
     const start = await screen.findByRole("button", { name: /start analysis/i });
