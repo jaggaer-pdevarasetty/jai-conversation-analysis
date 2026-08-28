@@ -101,10 +101,16 @@ def _conv_to_row(c: CommonConversation) -> dict:
 
 
 def _row_to_conv(data: dict) -> CommonConversation:
+    feedback = Feedback(**data["feedback"])
+    # Back-compat (ADR-0022): rows written before multi-feedback have no "feedbacks" — fall back
+    # to the single primary so old data keeps working without a migration.
+    raw_list = data.get("feedbacks")
+    feedbacks = [Feedback(**f) for f in raw_list] if raw_list else ([feedback] if feedback.rating is not None or feedback.comment else [])
     return CommonConversation(
         conversation_id=data["conversation_id"],
         messages=[Message(**m) for m in data["messages"]],
-        feedback=Feedback(**data["feedback"]),
+        feedback=feedback,
+        feedbacks=feedbacks,
         environment=data.get("environment", "uit"),
     )
 

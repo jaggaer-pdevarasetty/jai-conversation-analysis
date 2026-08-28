@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from ..pii import pseudonymize
 from .category import derive_category, recommended_next_step
 from .models import AnalysisRecord, Conversation, Metrics, Signals
 from .signals import detect_abandoned, detect_error, detect_repeated_prompts, feedback_signal
@@ -84,5 +85,6 @@ def analyze(conv: Conversation, run_id: str, now: str | None = None) -> Analysis
         region=conv.region,
         environment=conv.environment,
         tenant_id=conv.tenant_id,
+        user_hash=pseudonymize("user", conv.user_id) or "",  # one-way; distinct-user impact only
         enrichment=conv.enrichment,
     )

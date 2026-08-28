@@ -14,13 +14,20 @@ from .domain.models import CommonConversation, Conversation, Feedback
 from .pii import redact as scrub_pii
 
 
+def _scrub_feedback(f: Feedback) -> Feedback:
+    return Feedback(
+        rating=f.rating,
+        comment=scrub_pii(f.comment) if f.comment else None,
+        message_id=f.message_id,
+    )
+
+
 def deidentify(conv: Conversation) -> CommonConversation:
     messages = [replace(m, content=scrub_pii(m.content)) for m in conv.messages]
-    feedback = Feedback(
-        rating=conv.feedback.rating,
-        comment=scrub_pii(conv.feedback.comment) if conv.feedback.comment else None,
-        message_id=conv.feedback.message_id,
-    )
     return CommonConversation(
-        conversation_id=conv.id, messages=messages, feedback=feedback, environment=conv.environment
+        conversation_id=conv.id,
+        messages=messages,
+        feedback=_scrub_feedback(conv.feedback),  # primary (back-compat)
+        feedbacks=[_scrub_feedback(f) for f in conv.feedbacks],  # ALL feedback (ADR-0022)
+        environment=conv.environment,
     )

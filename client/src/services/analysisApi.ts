@@ -96,6 +96,13 @@ export interface DeepAnalysis {
   how_to_avoid: string;
   suggestions: string;
   user_remark: string;
+  root_cause?: string;
+}
+
+export interface Feedback {
+  rating: boolean | null;
+  comment: string | null;
+  message_id?: string | null;
 }
 
 /** Safe, PII-scrubbed signals from the JAI orchestrator + LangSmith trace (ADR-0018/0021). */
@@ -150,7 +157,8 @@ export interface ConversationDetail {
   enrichment?: Enrichment | null;
   metrics: Metrics;
   messages: Message[];
-  feedback: { rating: boolean | null; comment: string | null; message_id?: string | null };
+  feedback: Feedback;
+  feedbacks?: Feedback[];
 }
 
 export interface FeedbackItem extends ConversationSource {
@@ -160,10 +168,12 @@ export interface FeedbackItem extends ConversationSource {
   confidence: string;
   rating: boolean | null;
   comment: string | null;
+  feedbacks?: Feedback[];
   feedback_message_id?: string | null;
   recommended_next_step: string;
   rationale?: string;
   why_it_happened?: string;
+  root_cause?: string;
   input_tokens?: number | null;
   output_tokens?: number | null;
   analyzed_at?: string;
@@ -171,11 +181,39 @@ export interface FeedbackItem extends ConversationSource {
   deep: DeepAnalysis | null;
 }
 
+export interface RootCauseGroup {
+  root_cause: string;
+  label: string;
+  knowledge_gap: boolean;
+  conversations: number;
+  tenants: number;
+  users: number;
+  sample_conversation_ids: string[];
+  example_next_step: string;
+}
+
+export interface GroupsResponse {
+  items: RootCauseGroup[];
+  total: number;
+  scope: string;
+}
+
+/** Impact-ranked root-cause / knowledge-gap groups (ADR-0022). */
+export async function fetchGroups(params: { scope?: string; region?: string } = {}): Promise<GroupsResponse> {
+  const url = new URL(`${API_BASE}/api/analysis/groups`);
+  if (params.scope) url.searchParams.set("scope", params.scope);
+  if (params.region) url.searchParams.set("region", params.region);
+  const res = await fetch(withEnv(url).toString());
+  if (!res.ok) throw new Error(`Analysis API responded ${res.status}`);
+  return (await res.json()) as GroupsResponse;
+}
+
 export interface FeedbackQuery {
   rating?: string;
   category?: string;
   region?: string;
   scope?: string;
+  root_cause?: string;
   query?: string;
   tenant?: string;
   date_range?: string;

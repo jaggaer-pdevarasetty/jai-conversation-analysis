@@ -7,6 +7,7 @@ import { MarkdownContent } from "./MarkdownContent";
 
 const record: Detail = {
   conversation_id: "abc123",
+  source: { tenant_name: "Acme Corp", user_name: "jdoe", created_at: "2026-08-10T00:00:00Z", last_message_at: "2026-08-10T01:00:00Z" },
   analysis: {
     category: "failed_to_resolve",
     model_category: "failed_to_resolve",
@@ -42,6 +43,8 @@ describe("ConversationDetail", () => {
     render(<ConversationDetail id="abc123" initial={record} />);
     // Recommended action panel (mirrors the feedback view) holds the step + rationale.
     expect(screen.getByLabelText("Recommended action")).toBeInTheDocument();
+    // Conversation context panel (tier-1) shows source metadata.
+    expect(screen.getByLabelText("Conversation context")).toHaveTextContent("Acme Corp");
     expect(screen.getByText("Improve the password-reset answer.")).toBeInTheDocument();
     expect(screen.getByText("High confidence")).toBeInTheDocument();
     expect(screen.getByText("How do I reset my password?")).toBeInTheDocument();

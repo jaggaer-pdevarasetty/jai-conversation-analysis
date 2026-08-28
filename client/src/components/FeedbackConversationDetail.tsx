@@ -134,13 +134,18 @@ export function FeedbackConversationDetail({
   const positive = feedbackItem.rating === true;
   const source = detail.source ?? feedbackItem;
   const deep = detail.deep ?? feedbackItem.deep;
+  // ALL feedback in the chat, keyed by the message it was left on (ADR-0022).
+  const feedbackByMessage = new Map(
+    (detail.feedbacks ?? []).filter((f) => f.message_id).map((f) => [f.message_id as string, f]),
+  );
   const exactMessageId = feedbackItem.feedback_message_id ?? detail.feedback.message_id ?? null;
   const exactMessage = exactMessageId ? detail.messages.find((message) => message.id === exactMessageId) : undefined;
   const fallbackMessage = [...detail.messages].reverse().find((message) => message.role === "assistant");
   const highlightedMessage = exactMessage ?? fallbackMessage;
-  const exactLink = Boolean(exactMessage);
+  const exactLink = Boolean(exactMessage) || feedbackByMessage.size > 0;
   const accent = positive ? "#16815D" : "#C43D4B";
   const tint = positive ? "#F0FAF6" : "#FFF3F4";
+  const tone = (rating: boolean | null) => (rating ? "#16815D" : "#C43D4B");
 
   return (
     <Stack spacing={2.5}>
@@ -192,7 +197,14 @@ export function FeedbackConversationDetail({
           <Stack sx={{ p: { xs: 2.25, md: 3 } }}>
             {detail.messages.map((message: Message, index) => {
               const assistant = message.role === "assistant";
-              const highlighted = highlightedMessage?.id === message.id;
+              const msgFb = feedbackByMessage.get(message.id);
+              // Highlight EVERY message that carries feedback; when the API gave no per-message
+              // feedback, fall back to a single best-guess highlight (back-compat).
+              const highlighted = msgFb ? true : feedbackByMessage.size === 0 && highlightedMessage?.id === message.id;
+              const rating = msgFb ? msgFb.rating : feedbackItem.rating;
+              const comment = msgFb ? msgFb.comment : highlighted ? feedbackItem.comment : null;
+              const hAccent = msgFb ? tone(msgFb.rating) : accent;
+              const hTint = (msgFb ? msgFb.rating : positive) ? "#F0FAF6" : "#FFF3F4";
               return (
                 <Box key={message.id} sx={{ display: "flex", gap: 1.5, pb: index === detail.messages.length - 1 ? 0 : 3 }}>
                   <Avatar sx={{ width: 36, height: 36, bgcolor: assistant ? "#FFF0E9" : "#EEF2F7", color: assistant ? "primary.main" : "secondary.main" }}>
@@ -203,15 +215,15 @@ export function FeedbackConversationDetail({
                       <Typography variant="body2" sx={{ fontWeight: 750 }}>{roleLabel(message.role)}</Typography>
                       {message.created_at && <Typography variant="caption" color="text.secondary">{formatDate(message.created_at)}</Typography>}
                       {message.model && <Typography variant="caption" color="text.secondary">· {message.model}</Typography>}
-                      {highlighted && <Chip size="small" icon={positive ? <ThumbUpAltRoundedIcon /> : <ThumbDownAltRoundedIcon />} label={exactLink ? "Rated response" : "Feedback context"} color={positive ? "success" : "error"} />}
+                      {highlighted && <Chip size="small" icon={rating ? <ThumbUpAltRoundedIcon /> : <ThumbDownAltRoundedIcon />} label={exactLink ? "Rated response" : "Feedback context"} color={rating ? "success" : "error"} />}
                     </Box>
-                    <Box sx={{ mt: 0.75, px: 2, py: 1.6, borderRadius: 2.5, bgcolor: highlighted ? tint : assistant ? "#FFFFFF" : "#F7F8FA", border: highlighted ? "2px solid" : "1px solid", borderColor: highlighted ? accent : "divider", boxShadow: highlighted ? `0 8px 24px ${accent}18` : "none" }}>
+                    <Box sx={{ mt: 0.75, px: 2, py: 1.6, borderRadius: 2.5, bgcolor: highlighted ? hTint : assistant ? "#FFFFFF" : "#F7F8FA", border: highlighted ? "2px solid" : "1px solid", borderColor: highlighted ? hAccent : "divider", boxShadow: highlighted ? `0 8px 24px ${hAccent}18` : "none" }}>
                       <MarkdownContent>{message.content || "No message content"}</MarkdownContent>
                     </Box>
-                    {highlighted && feedbackItem.comment && (
-                      <Box sx={{ mt: 1, p: 1.4, borderRadius: 2, bgcolor: tint, borderLeft: "3px solid", borderColor: accent }}>
-                        <Typography variant="caption" sx={{ color: accent, fontWeight: 750 }}>USER FEEDBACK ON THIS CONTEXT</Typography>
-                        <Box sx={{ mt: 0.25, fontWeight: 650 }}><MarkdownContent>{feedbackItem.comment}</MarkdownContent></Box>
+                    {highlighted && comment && (
+                      <Box sx={{ mt: 1, p: 1.4, borderRadius: 2, bgcolor: hTint, borderLeft: "3px solid", borderColor: hAccent }}>
+                        <Typography variant="caption" sx={{ color: hAccent, fontWeight: 750 }}>USER FEEDBACK ON THIS CONTEXT</Typography>
+                        <Box sx={{ mt: 0.25, fontWeight: 650 }}><MarkdownContent>{comment}</MarkdownContent></Box>
                       </Box>
                     )}
                   </Box>
@@ -223,7 +235,10 @@ export function FeedbackConversationDetail({
 
         <Stack spacing={2.5} sx={{ position: { lg: "sticky" }, top: { lg: 96 } }}>
           <Paper sx={{ p: 2.5 }}>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}><InsightsRoundedIcon color="primary" /><Typography variant="h3">Root-cause analysis</Typography></Box>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+              <InsightsRoundedIcon color="primary" /><Typography variant="h3">Root-cause analysis</Typography>
+              {deep?.root_cause && <Chip size="small" variant="outlined" label={deep.root_cause.replace(/_/g, " ")} sx={{ ml: "auto" }} />}
+            </Box>
             {deep ? (
               <Stack spacing={1.8} divider={<Divider flexItem />} sx={{ mt: 2 }}>
                 <AnalysisSection title="What happened" body={deep.what_happened} />

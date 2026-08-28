@@ -31,6 +31,7 @@ import {
   Typography,
 } from "@mui/material";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CATEGORIES, fetchFeedback, type FeedbackItem, type FeedbackListResponse } from "../../src/services/analysisApi";
 import { CATEGORY_META, CategoryChip } from "../../src/components/CategoryChip";
@@ -70,6 +71,7 @@ export default function FeedbackPage() {
   const requestId = useRef(0);
   const invalidDateRange = Boolean(dateFrom && dateTo && dateFrom > dateTo);
   const { region, loading: regionLoading } = useRegion();
+  const rootCause = useSearchParams().get("root_cause") ?? "";  // drill-in from Insights
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -85,8 +87,12 @@ export default function FeedbackPage() {
     setError(null);
     fetchFeedback({
       region,
+      // Drill-in from Insights: widen to the same set the groups are computed over (thumbs OR
+      // negative outcomes) so a root-cause group actually shows its conversations.
+      scope: rootCause ? "all" : undefined,
       rating,
       category,
+      root_cause: rootCause,
       query,
       tenant,
       date_range: dateRange,
@@ -105,7 +111,7 @@ export default function FeedbackPage() {
       .finally(() => {
         if (currentRequest === requestId.current) setLoading(false);
       });
-  }, [category, dateFrom, dateRange, dateTo, page, query, rating, region, rowsPerPage, sort, tenant]);
+  }, [category, dateFrom, dateRange, dateTo, page, query, rating, region, rootCause, rowsPerPage, sort, tenant]);
 
   useEffect(() => {
     if (invalidDateRange) {
@@ -174,6 +180,15 @@ export default function FeedbackPage() {
           />
         </Stack>
       </Box>
+
+      {rootCause && (
+        <Alert
+          severity="info"
+          action={<Button component={Link} href="/feedback" color="inherit" size="small">Clear</Button>}
+        >
+          Showing conversations for root cause: <strong>{rootCause.replace(/_/g, " ")}</strong> (from Insights).
+        </Alert>
+      )}
 
       {negative > 0 && (
         <Alert severity="warning">

@@ -222,6 +222,20 @@ export function ConversationDetail({ id, initial }: { id: string; initial?: Deta
             </Stack>
           </Paper>
 
+          {detail.source && (
+            <Paper aria-label="Conversation context" sx={{ p: 2.5 }}>
+              <Typography variant="h3">Conversation context</Typography>
+              <Stack spacing={1.15} sx={{ mt: 2 }}>
+                <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">Tenant</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right" }}>{detail.source.tenant_name || "Unavailable"}</Typography></Box>
+                <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">User</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right", overflowWrap: "anywhere" }}>{detail.source.user_name || "Unavailable"}</Typography></Box>
+                <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">Created</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right" }}>{formatDate(detail.source.created_at ?? undefined)}</Typography></Box>
+                <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">Last message</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right" }}>{formatDate(detail.source.last_message_at ?? undefined)}</Typography></Box>
+                <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">Analysed</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right" }}>{formatDate(a.analyzed_at)}</Typography></Box>
+                <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">Analyzer</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right", overflowWrap: "anywhere" }}>{a.analyzer_version || "Not available"}</Typography></Box>
+              </Stack>
+            </Paper>
+          )}
+
           <Paper aria-label="Metrics" sx={{ p: 2.5 }}>
             <Typography variant="h3">Cost & responsiveness</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.4 }}>Conversation-level generation telemetry</Typography>

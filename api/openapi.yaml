@@ -69,6 +69,7 @@ paths:
         - { name: env, in: query, required: false, schema: { type: string, enum: [uit, prod] }, description: Environment (default uit) }
         - { name: rating, in: query, required: false, schema: { type: string, enum: [positive, negative] } }
         - { name: category, in: query, required: false, schema: { $ref: '#/components/schemas/Category' } }
+        - { name: root_cause, in: query, required: false, schema: { type: string }, description: Filter to one root-cause group (drill-in from Insights). }
         - { name: query, in: query, required: false, schema: { type: string }, description: Search feedback, source metadata, recommendation, or conversation ID. }
         - { name: tenant, in: query, required: false, schema: { type: string }, description: Case-insensitive tenant-name filter. }
         - { name: date_range, in: query, required: false, schema: { type: string, enum: [last_7_days, last_30_days] } }
@@ -79,6 +80,19 @@ paths:
         - { name: offset, in: query, required: false, schema: { type: integer, minimum: 0, default: 0 } }
       responses:
         '200': { description: A page of feedback records with unfiltered summary totals., content: { application/json: { schema: { $ref: '#/components/schemas/FeedbackListResponse' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /api/analysis/groups:
+    get:
+      tags: [analysis]
+      operationId: listRootCauseGroups
+      summary: Root-cause / knowledge-gap groups ranked by impact (ADR-0022)
+      parameters:
+        - { name: scope, in: query, required: false, schema: { type: string, enum: [issues, all], default: issues } }
+        - { name: region, in: query, required: false, schema: { type: string } }
+        - { name: env, in: query, required: false, schema: { type: string, enum: [uit, prod] }, description: Environment (default uit) }
+      responses:
+        '200': { description: Impact-ranked groups (aggregate counts only; no tenant/user identity)., content: { application/json: { schema: { $ref: '#/components/schemas/GroupsResponse' } } } }
         '400': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
   /api/analysis/conversations/{conversation_id}:
@@ -315,9 +329,37 @@ components:
         messages: { type: array, items: { $ref: '#/components/schemas/Message' } }
         feedback:
           type: object
+          description: Primary feedback (first / most-significant) — kept for back-compat.
           properties:
             rating: { type: [boolean, 'null'] }
             comment: { type: [string, 'null'] }
+        feedbacks:
+          type: array
+          description: ALL feedback in the chat, each tied to its turn/message (ADR-0022).
+          items:
+            type: object
+            properties:
+              rating: { type: [boolean, 'null'] }
+              comment: { type: [string, 'null'] }
+              message_id: { type: [string, 'null'] }
+    RootCauseGroup:
+      type: object
+      description: One root-cause / knowledge-gap bucket with aggregate impact (ADR-0022).
+      properties:
+        root_cause: { type: string }
+        label: { type: string }
+        knowledge_gap: { type: boolean }
+        conversations: { type: integer }
+        tenants: { type: integer }
+        users: { type: integer, description: Distinct users via one-way pseudonym (aggregate; no identity). }
+        sample_conversation_ids: { type: array, items: { type: string } }
+        example_next_step: { type: string }
+    GroupsResponse:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/RootCauseGroup' } }
+        total: { type: integer }
+        scope: { type: string }
     Enrichment:
       type: object
       description: >-
