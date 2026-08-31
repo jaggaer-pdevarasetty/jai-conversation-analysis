@@ -162,8 +162,8 @@ export default function TenantsPage() {
         <Paper sx={{ py: 8, px: 3, textAlign: "center" }}>
           <SearchRoundedIcon sx={{ fontSize: 36, color: "text.disabled" }} />
           <Typography variant="h3" sx={{ mt: 1 }}>{tenants.length ? "No tenants match" : "No tenants available"}</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{tenants.length ? "Try searching with a different tenant name or ID." : "No tenants are available in this region."}</Typography>
-          {tenants.length > 0 && <Button sx={{ mt: 2 }} onClick={() => { setSearch(""); setPage(0); }}>Clear search</Button>}
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{tenants.length ? "Try a different tenant name or ID, or turn off the Early Access filter." : "No tenants are available in this region."}</Typography>
+          {tenants.length > 0 && <Button sx={{ mt: 2 }} onClick={() => { setSearch(""); setEaOnly(false); setPage(0); }}>Clear filters</Button>}
         </Paper>
       )}
 

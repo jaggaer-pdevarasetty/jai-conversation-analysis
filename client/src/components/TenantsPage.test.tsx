@@ -45,4 +45,15 @@ describe("TenantsPage — Early Access", () => {
     expect(screen.queryByText("Acme Corp")).not.toBeInTheDocument();
     expect(screen.getByText("ENEL S.p.A.")).toBeInTheDocument();
   });
+
+  it("'Clear filters' in the empty state resets the Early Access filter too", async () => {
+    render(<TenantsPage />);
+    await screen.findByText("ENEL S.p.A.");
+    await userEvent.click(screen.getByLabelText("Early Access only"));
+    await userEvent.type(screen.getByLabelText("Search tenants"), "zzz-no-match");
+    // both hidden → empty state with a Clear filters button
+    await userEvent.click(await screen.findByRole("button", { name: "Clear filters" }));
+    expect(await screen.findByText("Acme Corp")).toBeInTheDocument(); // EA filter cleared
+    expect(screen.getByText("ENEL S.p.A.")).toBeInTheDocument();
+  });
 });

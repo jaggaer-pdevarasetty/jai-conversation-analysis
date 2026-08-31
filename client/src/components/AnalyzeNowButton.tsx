@@ -151,6 +151,10 @@ export function AnalyzeNowButton({
                 <Typography>
                   Found <b>{all.count}</b> new / unanalyzed conversation{all.count === 1 ? "" : "s"} in {scopeLabel}.
                 </Typography>
+                {/* Feedback pending is by construction a subset of all pending (feedback_only just
+                    narrows the same eligible set), so Normal = all - feedback >= 0; max(0,…) is a
+                    defensive guard. The extra feedback fetch runs in parallel (Promise.all) with the
+                    all fetch, so it adds no latency — it's what powers this breakdown. */}
                 <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                   <Chip size="small" color="primary" label={`Total ${all.count}`} />
                   <Chip size="small" color="secondary" variant="outlined" label={`New feedback ${feedback.count}`} />

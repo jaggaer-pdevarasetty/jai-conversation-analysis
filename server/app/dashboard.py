@@ -165,7 +165,7 @@ def tenants(region: str | None = None, env: str = "uit") -> list[dict]:
             "name": (name := m["name"] or f"Tenant {tid}"),
             "conversations": m["conversations"],
             "users": m["users"],
-            "ea": ea_info(name),  # Early Access badge (mirrors Confluence roster); None otherwise
+            "ea": ea_info(name, tid),  # Early Access badge (id-first, name fallback); None otherwise
         }
         for tid, m in merged.items()
     ]
@@ -270,7 +270,7 @@ def conversation_meta(ids: list[str], region: str | None = None, env: str = "uit
                         "region": label,
                         "tenant_id": str(r["tenant_id"]) if r["tenant_id"] is not None else None,
                         "tenant_name": (tn := r["tenant_name"] or (f"Tenant {r['tenant_id']}" if r["tenant_id"] else None)),
-                        "ea": ea_info(tn),  # Early Access badge on the reviewer/feedback views
+                        "ea": ea_info(tn, r["tenant_id"]),  # Early Access badge (id-first, name fallback)
                         "user_id": str(r["user_id"]) if r["user_id"] is not None else None,
                         "user_name": r["user_name"] or (f"User {r['user_id']}" if r["user_id"] else None),
                         "title": r["title"],
