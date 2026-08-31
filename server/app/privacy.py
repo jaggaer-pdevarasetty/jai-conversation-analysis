@@ -37,4 +37,5 @@ def apply_meta(meta: dict) -> dict:
         "tenant_id": None,
         "user_id": None,
         "title": None,  # conversation titles can carry company/PII
+        "ea": None,  # the EA badge's label names the tenant → drop it in pooled mode (AC-10)
     }

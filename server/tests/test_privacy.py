@@ -15,10 +15,13 @@ def test_pooled_mode_pseudonymizes_and_drops_identity(monkeypatch):
         "tenant_id": "20040002086", "tenant_name": "Natwest",
         "user_id": "7", "user_name": "gwiggins@jaggaer.com",
         "title": "Natwest procurement issue", "status": "active",
+        # EA badge names the tenant — must NOT survive pooled mode (regression: PR #12 leak).
+        "ea": {"label": "Natwest", "product": "JI", "status": "active", "privacy": "", "privacy_sensitive": False},
     }
     out = privacy.apply_meta(meta)
     assert out["tenant_name"].startswith("tenant-") and out["user_name"].startswith("user-")
     assert out["tenant_id"] is None and out["user_id"] is None and out["title"] is None
+    assert out["ea"] is None  # EA badge dropped in pooled mode
     blob = str(out)
     assert "Natwest" not in blob and "gwiggins@jaggaer.com" not in blob  # AC-10: no identity
 
