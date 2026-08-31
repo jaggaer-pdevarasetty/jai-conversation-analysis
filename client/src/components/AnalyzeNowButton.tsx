@@ -99,16 +99,13 @@ export function AnalyzeNowButton({
     setError("");
     setStarted(null);
     try {
-      if (isProd) {
-        const [fb, everything] = await Promise.all([
-          fetchPending(region, "feedback"),
-          fetchPending(region, "all"),
-        ]);
-        setFeedback(fb);
-        setAll(everything);
-      } else {
-        setAll(await fetchPending(region, "all"));
-      }
+      // Fetch both sets so we can always show the Total / New feedback / Normal breakdown.
+      const [fb, everything] = await Promise.all([
+        fetchPending(region, "feedback"),
+        fetchPending(region, "all"),
+      ]);
+      setFeedback(fb);
+      setAll(everything);
       setPhase("ready");
     } catch {
       setError("Couldn't fetch conversations. Is the API running?");
@@ -154,6 +151,15 @@ export function AnalyzeNowButton({
                 <Typography>
                   Found <b>{all.count}</b> new / unanalyzed conversation{all.count === 1 ? "" : "s"} in {scopeLabel}.
                 </Typography>
+                {/* Feedback pending is by construction a subset of all pending (feedback_only just
+                    narrows the same eligible set), so Normal = all - feedback >= 0; max(0,…) is a
+                    defensive guard. The extra feedback fetch runs in parallel (Promise.all) with the
+                    all fetch, so it adds no latency — it's what powers this breakdown. */}
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                  <Chip size="small" color="primary" label={`Total ${all.count}`} />
+                  <Chip size="small" color="secondary" variant="outlined" label={`New feedback ${feedback.count}`} />
+                  <Chip size="small" variant="outlined" label={`Normal ${Math.max(0, all.count - feedback.count)}`} />
+                </Stack>
                 <PendingPreview data={all} showRegions={!region} />
               </Stack>
             ) : (

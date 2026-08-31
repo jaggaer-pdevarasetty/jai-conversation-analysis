@@ -125,9 +125,18 @@ export interface Enrichment {
   langsmith_found: boolean;
 }
 
+export interface EAInfo {
+  key: string;
+  label: string;
+  product: string;
+  status: string;
+  privacy: string;
+  privacy_sensitive: boolean;
+}
 export interface ConversationSource {
   tenant_id?: string | null;
   tenant_name?: string | null;
+  ea?: EAInfo | null; // Early Access customer badge
   user_id?: string | null;
   user_name?: string | null;
   title?: string | null;
