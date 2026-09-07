@@ -28,6 +28,7 @@ class CommonStore:
         self._failed: set[Key] = set()
         self._events: dict[Key, list[str]] = {}  # (env,id) -> ISO analyse timestamps
         self._analyzing: set[Key] = set()  # transient: in-flight lazy/background analyses
+        self._override_events: dict[Key, list[Override]] = {}  # append-only override audit
 
     @staticmethod
     def _k(env: str, conversation_id: str) -> Key:
@@ -80,7 +81,13 @@ class CommonStore:
             category=category, actor=actor, at=datetime.now(timezone.utc).isoformat()
         )
         record.recommended_next_step = recommended_next_step(record.category)
+        # Auditability (J1-93353): every override is retained — append-only, never rewritten.
+        self._override_events.setdefault(self._k(env, conversation_id), []).append(record.override)
         return record
+
+    def override_events(self, conversation_id: str, env: str = "uit") -> list[Override]:
+        """Full override history for a conversation, oldest first (audit record)."""
+        return list(self._override_events.get(self._k(env, conversation_id), []))
 
     # reads -------------------------------------------------------------------
     def get_analysis(self, conversation_id: str, env: str = "uit") -> AnalysisRecord | None:

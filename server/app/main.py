@@ -87,7 +87,9 @@ def _eligible_by_region(
 def _sweep(region: str | None = None, env: str = "uit", feedback_only: bool = False) -> None:
     """Enqueue every eligible, not-yet-analysed conversation for an environment (deduped by the
     queue). `feedback_only` restricts to conversations with user feedback. Pre-filters with a
-    single analysed_ids() query so we don't fire one is_analysed() round-trip per id."""
+    single analysed_ids() query so we don't fire one is_analysed() round-trip per id.
+    Dead-lettered conversations are released first so THIS run retries them (reliability NFR)."""
+    analysis_queue.retry_dead(env)  # failed analyses are retried in the next run (J1-93353)
     analysed = store.analysed_ids(env)
     eligible = _eligible_by_region(region, env, feedback_only)
     ids = [cid for ids in eligible.values() for cid in ids if cid not in analysed]
@@ -368,6 +370,8 @@ def _conversation_detail(conversation_id: str, env: str = "uit") -> dict | None:
             "signals": asdict(record.signals),
             "status": record.status,
             "override": asdict(record.override) if record.override else None,
+            # Append-only audit trail: EVERY override ever applied, oldest first (J1-93353).
+            "override_history": [asdict(o) for o in store.override_events(conversation_id, env)],
             "run_id": record.run_id,
             "analyzer_version": record.analyzer_version,
             "analyzed_at": record.analyzed_at,
@@ -383,6 +387,11 @@ def _conversation_detail(conversation_id: str, env: str = "uit") -> dict | None:
                 "sequence_num": m.sequence_num,
                 "model": m.model,
                 "created_at": m.created_at,
+                # Per-message generation telemetry (FR-4): null = not captured (AC-7), never 0.
+                "input_tokens": m.input_tokens,
+                "output_tokens": m.output_tokens,
+                "prompt_tokens": m.prompt_tokens,
+                "ttft_ms": m.ttft_ms,
             }
             for m in conv.messages
         ],
@@ -752,6 +761,7 @@ def override_category(conversation_id: str, body: OverrideBody, env: str | None 
         "model_category": record.model_category,
         "recommended_next_step": record.recommended_next_step,
         "override": asdict(record.override) if record.override else None,
+        "override_history": [asdict(o) for o in store.override_events(conversation_id, _env(env))],
     }
 
 

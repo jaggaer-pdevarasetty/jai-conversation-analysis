@@ -69,6 +69,17 @@ _analyze_event = Table(
     Column("environment", String, index=True, server_default="uit"),
     Column("at", String),  # ISO timestamp; daily cap counts by date prefix
 )
+# Append-only override audit trail (J1-93353 auditability): every human override is retained,
+# oldest first — rows are only ever INSERTed, never updated or deleted.
+_override_event = Table(
+    "override_event", _metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("conversation_id", String, index=True),
+    Column("environment", String, index=True, server_default="uit"),
+    Column("category", String),
+    Column("actor", String),
+    Column("at", String),
+)
 
 
 def _rec_to_row(r: AnalysisRecord) -> dict:
@@ -215,7 +226,23 @@ class SqlResultStore:
         record.recommended_next_step = recommended_next_step(record.category)
         with self._engine.begin() as conn:
             self._put(conn, _analysis, conversation_id, env, _rec_to_row(record))
+            conn.execute(_override_event.insert().values(
+                conversation_id=conversation_id, environment=env,
+                category=category, actor=actor, at=record.override.at))
         return record
+
+    def override_events(self, conversation_id: str, env: str = "uit") -> list[Override]:
+        """Full override history for a conversation, oldest first (append-only audit table)."""
+        with self._engine.begin() as conn:
+            rows = conn.execute(
+                select(_override_event.c.category, _override_event.c.actor, _override_event.c.at)
+                .where(
+                    _override_event.c.conversation_id == conversation_id,
+                    _override_event.c.environment == env,
+                )
+                .order_by(_override_event.c.id)
+            ).all()
+        return [Override(category=cat, actor=actor, at=at) for cat, actor, at in rows]
 
     def get_analysis(self, conversation_id: str, env: str = "uit") -> AnalysisRecord | None:
         with self._engine.begin() as conn:

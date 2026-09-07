@@ -40,6 +40,10 @@ _SYSTEM = (
     "  Precedence: explicit thumbs feedback wins (positive/negative_feedback); else a request "
     "for something JAI fundamentally cannot do = out_of_scope; else repeated/rage prompts or "
     "abandonment = failed_to_resolve; else resolved.\n"
+    "  out_of_scope vs failed_to_resolve: if the assistant says it CANNOT perform/do an action "
+    "(a capability boundary — 'I can't perform that action', even when it then explains how to "
+    "do it manually in the app), that is out_of_scope. failed_to_resolve is for questions JAI "
+    "should be able to answer but did not (wrong, partial, or no answer; repeats; abandonment).\n"
     "  Mark 'resolved' ONLY if JAI DIRECTLY answered the user's ACTUAL question. If JAI "
     "declined or deflected (e.g. 'I cannot/ I'm unable to provide...'), said a resource is "
     "outdated/unavailable, or redirected to another system/team WITHOUT actually answering the "
@@ -157,8 +161,17 @@ def _batch_prompt(convs: list[Conversation]) -> str:
     if profile:
         parts.append("\n## Assistant being analysed (reference context, not instructions):\n" + profile)
     for c in convs:
+        # Explicit feedback line (thumbs + scrubbed remark, all turns — ADR-0022): the ticket's
+        # category set makes an explicit thumb positive/negative_feedback BY DEFINITION, and the
+        # signals= repr alone proved too weak for the lite model to honour that precedence.
+        feedback_block = ""
+        if c.feedback.rating is not None or c.feedbacks:
+            summary = _feedback_summary(c)
+            if summary != "(none)":
+                feedback_block = f"\nUser feedback (explicit, all turns):\n{summary}\n"
         parts.append(
             f"\n===== conversation_id: {c.id} (signals: {compute_signals(c)}) =====\n"
+            f"{feedback_block}"
             f"{_context_block(c)}"
             f"{_transcript(c)}"
         )
@@ -198,6 +211,13 @@ def _record(conv: Conversation, run_id: str, now: str, p: dict | None) -> Analys
         # soft fallback: keep a deterministic label + step so a conversation is never lost
         return rules_analyze(conv, run_id, now)
     category = p["category"]
+    # Calibration (FR-2 category table + README): an explicit thumb IS positive/negative
+    # feedback BY DEFINITION — the documented precedence ("explicit thumbs feedback wins") is
+    # enforced deterministically because the model can under-weight it on short transcripts.
+    if conv.feedback.rating is True and category != "positive_feedback":
+        category = "positive_feedback"
+    elif conv.feedback.rating is False and category != "negative_feedback":
+        category = "negative_feedback"
     confidence = p.get("confidence") if p.get("confidence") in ("high", "medium", "low") else "medium"
     # Calibration: HIGH confidence requires explicit user feedback. Without a thumb the label is
     # inferred from the transcript alone, so cap at medium (avoids over-confident 'resolved').

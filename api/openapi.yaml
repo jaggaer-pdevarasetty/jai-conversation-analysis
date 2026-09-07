@@ -305,6 +305,10 @@ components:
         sequence_num: { type: integer }
         model: { type: [string, 'null'] }
         created_at: { type: string }
+        input_tokens: { type: [integer, 'null'], description: Per-message input tokens; null = not captured (AC-7). }
+        output_tokens: { type: [integer, 'null'], description: Per-message output tokens; null = not captured (AC-7). }
+        prompt_tokens: { type: [integer, 'null'], description: Per-message prompt tokens; null = not captured (AC-7). }
+        ttft_ms: { type: [integer, 'null'], description: Per-message time to first token (ms); null = not captured (AC-7). }
     ConversationDetail:
       type: object
       required: [conversation_id, analysis, messages]
@@ -321,6 +325,10 @@ components:
             signals: { $ref: '#/components/schemas/Signals' }
             status: { $ref: '#/components/schemas/Status' }
             override: { anyOf: [{ $ref: '#/components/schemas/Override' }, { type: 'null' }] }
+            override_history:
+              type: array
+              description: Append-only audit trail — every override ever applied, oldest first.
+              items: { $ref: '#/components/schemas/Override' }
             run_id: { type: string }
             analyzer_version: { type: string }
             analyzed_at: { type: string, format: date-time }
@@ -399,6 +407,10 @@ components:
         model_category: { $ref: '#/components/schemas/Category' }
         recommended_next_step: { type: string }
         override: { anyOf: [{ $ref: '#/components/schemas/Override' }, { type: 'null' }] }
+        override_history:
+          type: array
+          description: Append-only audit trail — every override ever applied, oldest first.
+          items: { $ref: '#/components/schemas/Override' }
     RunSummary:
       type: object
       properties:

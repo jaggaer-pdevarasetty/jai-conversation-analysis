@@ -6,7 +6,8 @@ loops**:
 
 - **No loop / no re-run:** an id already analysed (`store.is_analysed`) is skipped; an id
   already queued or in-flight is not enqueued again (dedup set); a permanently failing id is
-  moved to a dead-letter after `max_attempts` and never retried again.
+  moved to a dead-letter after `max_attempts` and stays there until the NEXT run explicitly
+  releases it (`retry_dead` — retried in the next run, per the J1-93353 reliability NFR).
 - **Bounded:** a fixed `maxsize`; when full, `enqueue` applies backpressure (skips the rest)
   rather than exploding memory.
 - **Concurrency:** a small fixed worker pool pulls items and analyses them in batches.
@@ -82,6 +83,17 @@ class AnalysisQueue:
         if accepted:
             self._store.mark_analyzing(accepted, env)
         return accepted
+
+    def retry_dead(self, env: str) -> int:
+        """Release this environment's dead-lettered items so the NEXT run can retry them
+        (J1-93353 reliability: 'failed analysis are queued and retried in the next run').
+        Called at the start of a sweep — attempts were already reset when the item dead-lettered,
+        so it gets a fresh max_attempts budget. Returns how many items were released."""
+        with self._lock:
+            dead = [it for it in self._dead if it[0] == env]
+            for it in dead:
+                self._dead.discard(it)
+            return len(dead)
 
     def stats(self, limit: int = 100, offset: int = 0, env: str | None = None) -> dict:
         """Queue health. Scoped to one environment when `env` is given — UIT and PROD are shown
@@ -211,7 +223,7 @@ class AnalysisQueue:
                     self._queued_at.pop(item, None)
                     self._dead.add(item)
                     self._attempts.pop(item, None)
-                self._store.mark_failed(cid, env)  # visible as unanalysed; never retried again
+                self._store.mark_failed(cid, env)  # visible as unanalysed until the next run retries it
                 self._store.clear_analyzing(cid, env)
             else:
                 time.sleep(min(2 ** n, 10))  # backoff, then requeue

@@ -67,6 +67,51 @@ describe("ConversationDetail", () => {
     expect(screen.getByLabelText("Total tokens")).toHaveTextContent("unavailable");
   });
 
+  it("shows per-message generation telemetry under assistant messages (FR-4 full record)", () => {
+    const withTelemetry: Detail = {
+      ...record,
+      messages: [
+        ...record.messages,
+        {
+          id: "m3",
+          role: "assistant",
+          content: "Second answer",
+          sequence_num: 3,
+          model: "gemini",
+          created_at: "",
+          input_tokens: 130,
+          output_tokens: 48,
+          prompt_tokens: 120,
+          ttft_ms: 340,
+        },
+      ],
+    };
+    render(<ConversationDetail id="abc123" initial={withTelemetry} />);
+    // captured values render under the generated message…
+    expect(screen.getByText("TTFT 340 ms · in 130 tk · out 48 tk · prompt 120 tk")).toBeInTheDocument();
+    // …and a generated message WITHOUT telemetry reads "unavailable", never 0 (AC-7)
+    expect(screen.getByText("Telemetry unavailable")).toBeInTheDocument();
+  });
+
+  it("shows the full override audit trail, oldest first (auditability NFR)", () => {
+    const withHistory: Detail = {
+      ...record,
+      analysis: {
+        ...record.analysis,
+        override: { category: "out_of_scope", actor: "reviewer-b", at: "2026-08-11T02:00:00Z" },
+        override_history: [
+          { category: "failed_to_resolve", actor: "reviewer-a", at: "2026-08-11T01:00:00Z" },
+          { category: "out_of_scope", actor: "reviewer-b", at: "2026-08-11T02:00:00Z" },
+        ],
+      },
+    };
+    render(<ConversationDetail id="abc123" initial={withHistory} />);
+    expect(screen.getByText("Override audit trail")).toBeInTheDocument();
+    expect(screen.getByText(/1\. Failed to resolve by reviewer-a on/)).toBeInTheDocument();
+    expect(screen.getByText(/2\. Out of scope by reviewer-b on/)).toBeInTheDocument();
+    expect(screen.getByText(/Overridden by reviewer-b on/)).toBeInTheDocument();
+  });
+
   it("renders Markdown safely during server-side rendering", () => {
     const consoleError = jest.spyOn(console, "error").mockImplementation(() => undefined);
     try {

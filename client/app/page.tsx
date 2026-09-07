@@ -190,21 +190,33 @@ export default function OverviewPage() {
         </Stack>
       </Box>
 
-      {data.unanalysed > 0 ? (
-        <Alert severity="warning">
-          <AlertTitle>{data.unanalysed} {data.unanalysed === 1 ? "conversation is" : "conversations are"} waiting for analysis</AlertTitle>
-          Failed analyses remain visible and will be retried during the next scheduled run.
-        </Alert>
-      ) : (
-        <Paper sx={{ p: 2, display: "flex", alignItems: "center", gap: 1.5, bgcolor: "#F0FAF6", borderColor: "#CFEBDD" }}>
-          <CheckCircleOutlineRoundedIcon color="success" />
-          <Box>
-            <Typography variant="body2" sx={{ fontWeight: 750 }}>Analysis retry queue is clear</Typography>
-            <Typography variant="caption" color="text.secondary">No failed conversations are waiting for retry.</Typography>
-          </Box>
-          {run && <Chip size="small" label={`Last run ${formatDate(run.completed_at)}`} sx={{ ml: "auto", display: { xs: "none", sm: "flex" }, bgcolor: "#FFFFFF" }} />}
-        </Paper>
-      )}
+      {(() => {
+        // Full unanalysed visibility (J1-93353 reliability NFR): the overview total covers BOTH
+        // pending (never analysed) and failed (dead-lettered, retried next run) conversations.
+        const failed = overview?.unanalysed_failed ?? data.unanalysed;
+        const pending = overview?.unanalysed_pending ?? 0;
+        const waiting = overview?.unanalysed ?? data.unanalysed;
+        if (waiting > 0) {
+          return (
+            <Alert severity="warning">
+              <AlertTitle>{waiting} {waiting === 1 ? "conversation is" : "conversations are"} waiting for analysis</AlertTitle>
+              {pending > 0 && `${pending.toLocaleString()} new ${pending === 1 ? "conversation has" : "conversations have"} not been analysed yet. `}
+              {failed > 0 && `${failed.toLocaleString()} failed ${failed === 1 ? "analysis is" : "analyses are"} retained and will be retried on the next analysis run.`}
+              {pending === 0 && failed === 0 && "Conversations without an analysis remain visible here rather than silently excluded."}
+            </Alert>
+          );
+        }
+        return (
+          <Paper sx={{ p: 2, display: "flex", alignItems: "center", gap: 1.5, bgcolor: "#F0FAF6", borderColor: "#CFEBDD" }}>
+            <CheckCircleOutlineRoundedIcon color="success" />
+            <Box>
+              <Typography variant="body2" sx={{ fontWeight: 750 }}>Everything analysed — retry queue clear</Typography>
+              <Typography variant="caption" color="text.secondary">No pending or failed conversations are waiting for analysis.</Typography>
+            </Box>
+            {run && <Chip size="small" label={`Last run ${formatDate(run.completed_at)}`} sx={{ ml: "auto", display: { xs: "none", sm: "flex" }, bgcolor: "#FFFFFF" }} />}
+          </Paper>
+        );
+      })()}
 
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", xl: "repeat(3, 1fr)" }, gap: 2 }}>
         <StatCard label="Tenants" value={(overview?.tenants ?? "—").toLocaleString()} helper="Organisations in the authorised directory" icon={<BusinessRoundedIcon />} />

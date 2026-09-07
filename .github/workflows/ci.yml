@@ -41,6 +41,8 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - name: Unit + integration (pytest)
         run: python -m pytest -q
+      - name: Classifier quality gate (>=85% agreement, zero resolved-mislabels)
+        run: python -m app.eval
       - name: Contract (OpenAPI 3.1 from FastAPI)
         if: github.event_name == 'pull_request'
         run: python -c "from app.main import app; assert app.openapi()['openapi'].startswith('3.1')"

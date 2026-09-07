@@ -31,12 +31,39 @@ def test_batch_uses_dynamic_llm_recommendation_and_confidence():
     by_id = {r.conversation_id: r for r in recs}
     for c in CONVERSATIONS[:3]:
         r = by_id[c.id]
-        assert r.model_category == "out_of_scope"
+        # Calibration: an explicit thumb IS the feedback category by definition (FR-2 table),
+        # so the model's raw label only survives on conversations WITHOUT explicit feedback.
+        if c.feedback.rating is True:
+            assert r.model_category == "positive_feedback"
+        elif c.feedback.rating is False:
+            assert r.model_category == "negative_feedback"
+        else:
+            assert r.model_category == "out_of_scope"
         assert r.recommended_next_step.startswith("Custom step")  # dynamic, not a per-category lookup
         assert r.rationale == "grounded in the transcript"
         assert r.analyzer_version.startswith("vertex:")
         # Calibration: the LLM said "high", but HIGH only survives with explicit feedback.
         assert r.confidence == ("high" if c.feedback.rating is not None else "medium")
+
+
+def test_explicit_thumbs_feedback_wins_over_the_model_label():
+    """FR-2 category table: a thumbs-down IS explicit negative feedback (and thumbs-up positive)
+    BY DEFINITION — the documented precedence is enforced even when the model returns a
+    failure/out-of-scope label (found via the live eval: the lite model under-weighted it)."""
+    thumbs_down = next(c for c in CONVERSATIONS if c.feedback.rating is False)
+    thumbs_up = next(c for c in CONVERSATIONS if c.feedback.rating is True)
+
+    def gen_wrong(prompt: str) -> str:
+        if "what_happened" in prompt:  # deep-analysis call for the feedback conversation
+            return "{}"
+        ids = re.findall(r"conversation_id: (\S+)", prompt)
+        return json.dumps(
+            [{"conversation_id": cid, "category": "failed_to_resolve", "confidence": "high",
+              "recommended_next_step": "fix", "rationale": "r"} for cid in ids]
+        )
+
+    recs = gemini.analyze_batch_vertex([thumbs_down, thumbs_up], "run", "t", generate=gen_wrong)
+    assert [r.model_category for r in recs] == ["negative_feedback", "positive_feedback"]
 
 
 def test_high_confidence_requires_explicit_feedback():

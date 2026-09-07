@@ -7,7 +7,9 @@ export interface Overview {
   users: number;
   conversations: number;
   analysed: number;
-  unanalysed: number;
+  unanalysed: number; // true total: pending (never analysed) + failed (dead-lettered)
+  unanalysed_pending?: number;
+  unanalysed_failed?: number;
   counts: Record<string, number>;
   telemetry_complete: number;
   telemetry_total: number;

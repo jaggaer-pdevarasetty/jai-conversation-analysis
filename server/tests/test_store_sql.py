@@ -31,7 +31,7 @@ def store() -> SqlResultStore:
         pytest.skip(f"Postgres not reachable at TEST_DATABASE_URL: {type(exc).__name__}")
     engine = create_engine(PG_URL)
     with engine.begin() as conn:
-        conn.execute(text("TRUNCATE analysis, conversation, failed"))
+        conn.execute(text("TRUNCATE analysis, conversation, failed, override_event"))
     engine.dispose()
     return s
 
@@ -58,6 +58,21 @@ def test_override_is_persisted(store: SqlResultStore):
     rec = SqlResultStore(PG_URL).get_analysis(POSITIVE.id)
     assert rec.category == "out_of_scope"  # effective (override)
     assert rec.model_category == "positive_feedback"  # original retained (audit)
+
+
+def test_override_audit_trail_is_persisted_append_only(store: SqlResultStore):
+    """Auditability NFR: every override event lands in the append-only override_event table
+    and survives a fresh connection — not just the latest override on the record."""
+    store.upsert(analyze(POSITIVE, "run"), deidentify(POSITIVE))
+    store.set_override(POSITIVE.id, "out_of_scope", "reviewer-a")
+    store.set_override(POSITIVE.id, "failed_to_resolve", "reviewer-b")
+    fresh = SqlResultStore(PG_URL)  # new connection → real persistence, oldest first
+    events = fresh.override_events(POSITIVE.id)
+    assert [(e.category, e.actor) for e in events] == [
+        ("out_of_scope", "reviewer-a"),
+        ("failed_to_resolve", "reviewer-b"),
+    ]
+    assert fresh.override_events("never-overridden") == []
 
 
 def test_failed_count_is_visible(store: SqlResultStore):
