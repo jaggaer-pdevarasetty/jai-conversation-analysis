@@ -283,13 +283,18 @@ export function ConversationDetail({ id, initial }: { id: string; initial?: Deta
               <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">Analyzer</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right", overflowWrap: "anywhere" }}>{a.analyzer_version || "Not available"}</Typography></Box>
               <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">Run ID</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right", overflowWrap: "anywhere" }}>{a.run_id || "Not available"}</Typography></Box>
               <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">Analysed</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right" }}>{formatDate(a.analyzed_at)}</Typography></Box>
-              {a.override && <Alert severity="warning" sx={{ mt: 0.5 }}>Overridden by {a.override.actor} on {formatDate(a.override.at)}</Alert>}
-              {(a.override_history?.length ?? 0) > 1 && (
+              {a.override && (
+                <Alert severity="warning" sx={{ mt: 0.5 }}>
+                  Overridden by {a.override.actor} on {formatDate(a.override.at)}
+                  {a.override.previous_category && ` (${categoryLabel(a.override.previous_category)} → ${categoryLabel(a.override.category)})`}
+                </Alert>
+              )}
+              {(a.override_history?.length ?? 0) > 0 && (
                 <Box sx={{ mt: 0.5 }}>
                   <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontWeight: 700 }}>Override audit trail</Typography>
                   {a.override_history?.map((event, index) => (
                     <Typography key={`${event.at}-${index}`} variant="caption" color="text.secondary" sx={{ display: "block" }}>
-                      {index + 1}. {categoryLabel(event.category)} by {event.actor} on {formatDate(event.at)}
+                      {index + 1}. {event.previous_category ? `${categoryLabel(event.previous_category)} → ${categoryLabel(event.category)}` : categoryLabel(event.category)} by {event.actor} on {formatDate(event.at)}
                     </Typography>
                   ))}
                 </Box>

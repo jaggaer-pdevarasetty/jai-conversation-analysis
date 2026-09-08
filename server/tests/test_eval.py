@@ -55,3 +55,76 @@ def test_gold_file_rejects_invalid_entries_loudly(tmp_path, monkeypatch):
         raise AssertionError("invalid gold entries must raise")
     except ValueError as exc:
         assert "not-a-category" in str(exc)
+
+
+def test_gold_entries_without_conversations_fail_unless_allowed():
+    """A gold entry that can't be evaluated is a FAILED measurement, never a silent skip:
+    it is recorded as missing and fails the gate unless explicitly allowed (CI, no store)."""
+    gold = {**GOLD, "not-loaded-anywhere": "resolved"}
+    report = evaluate(analyze, gold=gold)
+    assert report.missing == ["not-loaded-anywhere"]
+    assert report.total == len(GOLD)  # only the evaluable entries are scored
+    assert not report.passed()  # incomplete coverage → FAIL
+
+    allowed = evaluate(analyze, gold=gold, allow_missing=True)
+    assert allowed.missing == ["not-loaded-anywhere"]  # still surfaced…
+    assert allowed.passed()  # …but permitted (CI mode: no results store to load from)
+
+
+def test_real_gold_conversations_are_loaded_from_the_results_store(monkeypatch):
+    """Growing eval_gold.json with REAL conversation ids must actually evaluate them: they are
+    loaded from our own results store (de-identified transcripts) and classified like production."""
+    from dataclasses import replace
+
+    from app.config import settings
+    from app.deidentify import deidentify
+    from app.domain.analyze import analyze as rules
+    from app.eval import load_eval_conversations
+    from app.fixtures import CONVERSATIONS
+    from app.store import CommonStore
+
+    real = replace(CONVERSATIONS[0], id="real-gold-conv-1")  # a stand-in for a stored conversation
+    store = CommonStore()
+    store.upsert(rules(real, "run"), deidentify(real))
+    # Settings is a frozen dataclass → patch the module attribute with a replaced instance
+    # (eval.py imports `settings` at call time, so it picks this up).
+    monkeypatch.setattr("app.config.settings", replace(settings, store_backend="sql"))
+    monkeypatch.setattr("app.store_factory.make_store", lambda: store)
+
+    gold = {"real-gold-conv-1": "resolved"}
+    convs = {c.id: c for c in load_eval_conversations(gold)}
+    assert "real-gold-conv-1" in convs  # sourced from the store, not just the fixtures
+    report = evaluate(analyze, conversations=list(convs.values()), gold=gold)
+    assert report.total == 1 and report.missing == []
+    assert report.passed()
+
+
+def test_model_outage_cannot_pass_the_quality_gate(monkeypatch, capsys):
+    """When Vertex is configured but produces no record, the eval must FAIL even though the
+    rules fallback would agree — an unavailable model is an outage, not a passing measurement."""
+    from dataclasses import replace
+
+    from app import gemini
+    from app.config import settings
+    from app.eval import main
+
+    # Settings is frozen → swap in a replaced instance (vertex_configured becomes True).
+    monkeypatch.setattr(
+        "app.config.settings",
+        replace(settings, vertex_project="proj", vertex_location="us-central1"),
+    )
+    monkeypatch.setattr(gemini, "make_batch_analyzer", lambda: (lambda convs, run_id, now: []))
+
+    assert main([]) == 1  # gate FAILS on the rules fallback while the model is down
+    out = capsys.readouterr().out
+    assert "MODEL UNAVAILABLE" in out
+
+
+def test_eval_cli_passes_on_the_rules_baseline(monkeypatch, capsys):
+    """Without Vertex configured the gate measures the deterministic rules baseline (CI mode)."""
+    from app.eval import main
+
+    assert main(["--allow-missing"]) == 0
+    out = capsys.readouterr().out
+    assert "RESULT: PASS" in out
+    assert f"evaluable: {len(load_gold())}/{len(load_gold())}" in out

@@ -209,6 +209,66 @@ paths:
       responses:
         '202': { description: Sweep started or already running., content: { application/json: { schema: { $ref: '#/components/schemas/SweepStatus' } } } }
         '400': { $ref: '#/components/responses/Problem' }
+  /api/analysis/dashboard/overview:
+    get:
+      tags: [analysis]
+      operationId: dashboardOverview
+      summary: Aggregate overview (tenants, users, conversations, analysis coverage, backlog)
+      description: >-
+        Authorised admin view. `unanalysed` is the true in-scope total: pending (eligible,
+        never analysed) + failed (dead-lettered, retried on the next run). When `region` is
+        given, the backlog breakdown is region-scoped — failures whose source region is
+        unknown appear only in the all-regions count.
+      parameters:
+        - { name: region, in: query, required: false, schema: { type: string }, description: Region label (e.g. us/eu/uk); omit for all regions }
+        - { name: env, in: query, required: false, schema: { type: string, enum: [uit, prod] }, description: Environment (default uit) }
+      responses:
+        '200': { description: Overview aggregates., content: { application/json: { schema: { $ref: '#/components/schemas/DashboardOverview' } } } }
+        '503': { $ref: '#/components/responses/Problem' }
+  /api/analysis/dashboard/tenants:
+    get:
+      tags: [analysis]
+      operationId: dashboardTenants
+      summary: Tenant directory (authorised admin view; blocked in pooled privacy mode)
+      parameters:
+        - { name: region, in: query, required: false, schema: { type: string }, description: Region label; omit for all regions }
+        - { name: env, in: query, required: false, schema: { type: string, enum: [uit, prod] }, description: Environment (default uit) }
+      responses:
+        '200': { description: Tenant list., content: { application/json: { schema: { $ref: '#/components/schemas/TenantsResponse' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /api/analysis/dashboard/tenants/{tenant_id}/users:
+    get:
+      tags: [analysis]
+      operationId: dashboardUsers
+      summary: Users of a tenant (authorised admin view; blocked in pooled privacy mode)
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string } }
+        - { name: region, in: query, required: false, schema: { type: string }, description: Region label; omit for all regions }
+        - { name: env, in: query, required: false, schema: { type: string, enum: [uit, prod] }, description: Environment (default uit) }
+      responses:
+        '200': { description: User list., content: { application/json: { schema: { $ref: '#/components/schemas/UsersResponse' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /api/analysis/dashboard/tenants/{tenant_id}/users/{user_id}/conversations:
+    get:
+      tags: [analysis]
+      operationId: dashboardUserConversations
+      summary: Conversation history for a user (authorised admin view; blocked in pooled mode)
+      description: >-
+        UIT only: browsing may lazily enqueue pending conversations for analysis. PROD never
+        auto-analyses — analysis there is explicit (per-conversation button or a feedback sweep).
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string } }
+        - { name: user_id, in: path, required: true, schema: { type: string } }
+        - { name: region, in: query, required: false, schema: { type: string }, description: Region label; omit for all regions }
+        - { name: env, in: query, required: false, schema: { type: string, enum: [uit, prod] }, description: Environment (default uit) }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+        - { name: offset, in: query, required: false, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        '200': { description: Conversation list., content: { application/json: { schema: { $ref: '#/components/schemas/UserConversationsResponse' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
 components:
   responses:
     Problem:
@@ -239,6 +299,10 @@ components:
         category: { $ref: '#/components/schemas/Category' }
         actor: { type: string }
         at: { type: string, format: date-time }
+        previous_category:
+          anyOf: [{ $ref: '#/components/schemas/Category' }, { type: 'null' }]
+          description: The effective category BEFORE this override (model label, or the prior
+            override) — makes each audit entry a self-contained old-to-new transition.
     ListItem:
       type: object
       required: [conversation_id, category, status]
@@ -411,6 +475,71 @@ components:
           type: array
           description: Append-only audit trail — every override ever applied, oldest first.
           items: { $ref: '#/components/schemas/Override' }
+    DashboardOverview:
+      type: object
+      description: Authorised admin aggregates. `unanalysed` = pending + failed (true total).
+      properties:
+        region: { type: [string, 'null'] }
+        tenants: { type: integer }
+        users: { type: integer }
+        conversations: { type: integer }
+        analysed: { type: integer }
+        unanalysed: { type: integer, description: True in-scope total (pending + failed). }
+        unanalysed_pending: { type: integer, description: Eligible, never analysed. Region-scoped when a region is selected. }
+        unanalysed_failed: { type: integer, description: Attempted, dead-lettered — retried on the next run. Region-scoped when a region is selected (unknown-region failures count only in the all-regions total). }
+        counts: { type: object, additionalProperties: { type: integer } }
+        telemetry_complete: { type: integer }
+        telemetry_total: { type: integer }
+    TenantsResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              tenant_id: { type: string }
+              name: { type: string }
+              conversations: { type: integer }
+              users: { type: integer }
+              ea:
+                anyOf: [{ type: object, description: Early Access customer badge (label/product/status/privacy). }, { type: 'null' }]
+        region: { type: [string, 'null'] }
+        environment: { type: string }
+    UsersResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              user_id: { type: string }
+              user_name: { type: string }
+              role: { type: [string, 'null'] }
+              conversations: { type: integer }
+        region: { type: [string, 'null'] }
+        environment: { type: string }
+    UserConversationsResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              conversation_id: { type: string }
+              title: { type: [string, 'null'] }
+              message_count: { type: [integer, 'null'] }
+              last_message_at: { type: [string, 'null'], format: date-time }
+              analysed: { type: boolean }
+              status: { type: string }
+              category: { $ref: '#/components/schemas/Category' }
+              confidence: { type: [string, 'null'] }
+              recommended_next_step: { type: [string, 'null'] }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
     RunSummary:
       type: object
       properties:

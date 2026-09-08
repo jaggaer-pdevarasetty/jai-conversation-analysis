@@ -106,7 +106,10 @@ def overview(store: CommonStore, region: str | None = None, env: str = "uit") ->
     records = store.list(region=region, env=env)
     counts = store.count_by_category(region=region, env=env)
     analysed = sum(counts.values())
-    failed = store.unanalysed_count(env=env)
+    # Region-scoped when a region is selected: the backlog breakdown must match the region-
+    # filtered source/analysed totals, not the whole environment's failures. Failures whose
+    # source region is unknown ("") only appear in the all-regions (env-wide) count.
+    failed = store.unanalysed_count(env=env, region=region)
     telemetry_complete = sum(
         record.metrics.ttft_ms is not None
         and record.metrics.input_tokens is not None

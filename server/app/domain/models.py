@@ -129,6 +129,9 @@ class Override:
     category: Category
     actor: str
     at: str
+    # The effective category BEFORE this override (model label, or the prior override) —
+    # makes each audit entry a self-contained old→new transition (J1-93353 auditability).
+    previous_category: Optional[Category] = None
 
 
 @dataclass

@@ -25,7 +25,7 @@ class CommonStore:
     def __init__(self) -> None:
         self._analyses: dict[Key, AnalysisRecord] = {}
         self._conversations: dict[Key, CommonConversation] = {}
-        self._failed: set[Key] = set()
+        self._failed: dict[Key, str] = {}  # (env,id) -> source region ("" = unknown)
         self._events: dict[Key, list[str]] = {}  # (env,id) -> ISO analyse timestamps
         self._analyzing: set[Key] = set()  # transient: in-flight lazy/background analyses
         self._override_events: dict[Key, list[Override]] = {}  # append-only override audit
@@ -57,12 +57,14 @@ class CommonStore:
         key = self._k(record.environment, record.conversation_id)  # idempotent per (env, id)
         self._analyses[key] = record
         self._conversations[key] = conversation
-        self._failed.discard(key)
+        self._failed.pop(key, None)
 
-    def mark_failed(self, conversation_id: str, env: str = "uit") -> None:
+    def mark_failed(self, conversation_id: str, env: str = "uit", region: str = "") -> None:
+        # `region` (when known) lets regional dashboards scope the backlog correctly; "" = the
+        # failure happened where the source region wasn't available (batch load error etc.).
         key = self._k(env, conversation_id)
         if key not in self._analyses:
-            self._failed.add(key)
+            self._failed[key] = region or ""
 
     def is_analysed(self, conversation_id: str, env: str = "uit") -> bool:
         return self._k(env, conversation_id) in self._analyses
@@ -77,8 +79,10 @@ class CommonStore:
         record = self._analyses.get(self._k(env, conversation_id))
         if record is None:
             return None
+        previous = record.category  # effective before this override (model label or prior override)
         record.override = Override(
-            category=category, actor=actor, at=datetime.now(timezone.utc).isoformat()
+            category=category, actor=actor, at=datetime.now(timezone.utc).isoformat(),
+            previous_category=previous,
         )
         record.recommended_next_step = recommended_next_step(record.category)
         # Auditability (J1-93353): every override is retained — append-only, never rewritten.
@@ -126,5 +130,9 @@ class CommonStore:
             counts[r.category] += 1
         return counts
 
-    def unanalysed_count(self, env: str = "uit") -> int:
-        return sum(1 for (e, _) in self._failed if e == env)
+    def unanalysed_count(self, env: str = "uit", region: str | None = None) -> int:
+        """Failed/unanalysed conversations. Region-scoped when `region` is given (failures whose
+        source region is unknown — "" — only appear in the env-wide count, never a region's)."""
+        if region is None:
+            return sum(1 for (e, _) in self._failed if e == env)
+        return sum(1 for (e, _), r in self._failed.items() if e == env and r == region)

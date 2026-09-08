@@ -194,7 +194,8 @@ class AnalysisQueue:
                 self._store.record_analysis(cid, now, env)
                 self._finish(env, cid)
             else:
-                self._retry_or_dead([(env, cid)])
+                # region is known here → the regional dashboards can scope this failure
+                self._retry_or_dead([(env, cid)], region=conv.region)
 
     def _finish(self, env: str, cid: str) -> None:
         item = (env, cid)
@@ -206,7 +207,9 @@ class AnalysisQueue:
             self._attempts.pop(item, None)
         self._store.clear_analyzing(cid, env)
 
-    def _retry_or_dead(self, items: list[Item]) -> None:
+    def _retry_or_dead(self, items: list[Item], region: str = "") -> None:
+        # `region` is the source region of the failing conversation(s) when known (per-conversation
+        # failure path); batch-level failures pass "" (unknown) — those only show in env-wide counts.
         for item in items:
             env, cid = item
             with self._lock:
@@ -223,7 +226,7 @@ class AnalysisQueue:
                     self._queued_at.pop(item, None)
                     self._dead.add(item)
                     self._attempts.pop(item, None)
-                self._store.mark_failed(cid, env)  # visible as unanalysed until the next run retries it
+                self._store.mark_failed(cid, env, region)  # visible as unanalysed until the next run retries it
                 self._store.clear_analyzing(cid, env)
             else:
                 time.sleep(min(2 ** n, 10))  # backoff, then requeue

@@ -93,23 +93,25 @@ describe("ConversationDetail", () => {
     expect(screen.getByText("Telemetry unavailable")).toBeInTheDocument();
   });
 
-  it("shows the full override audit trail, oldest first (auditability NFR)", () => {
+  it("shows the full override audit trail, oldest first, with old-to-new transitions", () => {
     const withHistory: Detail = {
       ...record,
       analysis: {
         ...record.analysis,
-        override: { category: "out_of_scope", actor: "reviewer-b", at: "2026-08-11T02:00:00Z" },
+        override: { category: "out_of_scope", actor: "reviewer-b", at: "2026-08-11T02:00:00Z", previous_category: "negative_feedback" },
         override_history: [
-          { category: "failed_to_resolve", actor: "reviewer-a", at: "2026-08-11T01:00:00Z" },
-          { category: "out_of_scope", actor: "reviewer-b", at: "2026-08-11T02:00:00Z" },
+          // first transition starts from the model label; later ones from the prior override
+          { category: "negative_feedback", actor: "reviewer-a", at: "2026-08-11T01:00:00Z", previous_category: "failed_to_resolve" },
+          { category: "out_of_scope", actor: "reviewer-b", at: "2026-08-11T02:00:00Z", previous_category: "negative_feedback" },
         ],
       },
     };
     render(<ConversationDetail id="abc123" initial={withHistory} />);
     expect(screen.getByText("Override audit trail")).toBeInTheDocument();
-    expect(screen.getByText(/1\. Failed to resolve by reviewer-a on/)).toBeInTheDocument();
-    expect(screen.getByText(/2\. Out of scope by reviewer-b on/)).toBeInTheDocument();
-    expect(screen.getByText(/Overridden by reviewer-b on/)).toBeInTheDocument();
+    expect(screen.getByText(/1\. Failed to resolve → Negative feedback by reviewer-a on/)).toBeInTheDocument();
+    expect(screen.getByText(/2\. Negative feedback → Out of scope by reviewer-b on/)).toBeInTheDocument();
+    // the current-override alert states the transition too
+    expect(screen.getByText(/Overridden by reviewer-b on .*\(Negative feedback → Out of scope\)/)).toBeInTheDocument();
   });
 
   it("renders Markdown safely during server-side rendering", () => {

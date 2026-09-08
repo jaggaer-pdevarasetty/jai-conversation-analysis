@@ -211,19 +211,36 @@ def _record(conv: Conversation, run_id: str, now: str, p: dict | None) -> Analys
         # soft fallback: keep a deterministic label + step so a conversation is never lost
         return rules_analyze(conv, run_id, now)
     category = p["category"]
-    # Calibration (FR-2 category table + README): an explicit thumb IS positive/negative
-    # feedback BY DEFINITION — the documented precedence ("explicit thumbs feedback wins") is
-    # enforced deterministically because the model can under-weight it on short transcripts.
-    if conv.feedback.rating is True and category != "positive_feedback":
-        category = "positive_feedback"
-    elif conv.feedback.rating is False and category != "negative_feedback":
-        category = "negative_feedback"
+    # Calibration (FR-2 category table + README): UNAMBIGUOUS explicit thumbs feedback IS
+    # positive/negative feedback BY DEFINITION — the documented precedence ("explicit thumbs
+    # feedback wins") is enforced deterministically because the model can under-weight it on
+    # short transcripts. MIXED ratings (up AND down on different turns, ADR-0022) are left to
+    # the model, which sees the full feedback summary — a later thumbs-up can therefore
+    # outweigh an earlier thumbs-down in its judgement (and vice versa).
+    fbs = conv.feedbacks or (
+        [conv.feedback] if (conv.feedback.rating is not None or conv.feedback.comment) else []
+    )
+    ratings = [f.rating for f in fbs if f.rating is not None]
+    has_up = any(r is True for r in ratings)
+    has_down = any(r is False for r in ratings)
+    enforced = None
+    if has_down and not has_up:
+        enforced = "negative_feedback"
+    elif has_up and not has_down:
+        enforced = "positive_feedback"
+    recalibrated = enforced is not None and category != enforced
+    if recalibrated:
+        category = enforced
     confidence = p.get("confidence") if p.get("confidence") in ("high", "medium", "low") else "medium"
     # Calibration: HIGH confidence requires explicit user feedback. Without a thumb the label is
     # inferred from the transcript alone, so cap at medium (avoids over-confident 'resolved').
     if confidence == "high" and conv.feedback.rating is None:
         confidence = "medium"
-    step = (p.get("recommended_next_step") or "").strip() or recommended_next_step(category)  # type: ignore[arg-type]
+    # A recalibrated record must NOT keep the step the model wrote for the rejected label —
+    # use the enforced category's recommended step so category and remediation always agree.
+    step = (p.get("recommended_next_step") or "").strip()
+    if recalibrated or not step:
+        step = recommended_next_step(category)  # type: ignore[arg-type]
     return AnalysisRecord(
         conversation_id=conv.id,
         model_category=category,  # type: ignore[arg-type]

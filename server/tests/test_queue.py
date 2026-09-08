@@ -79,9 +79,10 @@ def test_dead_letter_is_retried_by_the_next_run():
     q = AnalysisQueue(store, _rules_batch, workers=0, max_attempts=1)
     cid = IDS[0]
     q.enqueue([cid])
-    q._retry_or_dead([("uit", cid)])  # fails → dead-letter immediately (max_attempts=1)
+    q._retry_or_dead([("uit", cid)], region="us")  # fails → dead-letter, region recorded
     assert q.stats(env="uit")["dead_letter"] == 1
     assert store.unanalysed_count("uit") == 1  # visible, not silently excluded
+    assert store.unanalysed_count("uit", region="us") == 1  # region-scoped backlog stays correct
     # dead items are not re-enqueued by a plain enqueue (no loop)…
     assert q.enqueue([cid]) == []
     # …but the NEXT run releases them and they become eligible again

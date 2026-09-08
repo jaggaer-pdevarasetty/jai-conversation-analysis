@@ -161,8 +161,8 @@ export interface ConversationDetail {
     rationale: string;
     signals?: Signals;
     status: string;
-    override: { category: string; actor: string; at: string } | null;
-    override_history?: { category: string; actor: string; at: string }[]; // append-only audit
+    override: { category: string; actor: string; at: string; previous_category?: string | null } | null;
+    override_history?: { category: string; actor: string; at: string; previous_category?: string | null }[]; // append-only audit
     run_id?: string;
     analyzed_at: string;
     analyzer_version?: string;

@@ -25,7 +25,7 @@ def operational_stats(store: CommonStore, queue=None, latest_run=None, region: s
         "region": region,
         "environment": env,
         "analysed": len(records),
-        "unanalysed": store.unanalysed_count(env),
+        "unanalysed": store.unanalysed_count(env, region=region),
         "counts": store.count_by_category(region=region, env=env),
         "analyzers": dict(Counter(r.analyzer_version for r in records)),  # vertex vs rules
         "by_region": dict(Counter((r.region or "unknown") for r in records)),
@@ -97,5 +97,5 @@ def product_report(store: CommonStore, top: int = 10, region: str | None = None,
         "new_use_cases": new_use_cases,
         "by_region": by_region,
         "top_tenants_by_issues": top_tenants,
-        "unanalysed": store.unanalysed_count(env),
+        "unanalysed": store.unanalysed_count(env, region=region),
     }

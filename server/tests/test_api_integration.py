@@ -165,7 +165,7 @@ def test_human_override_updates_effective_category_and_audits():
 
 def test_override_history_is_retained_append_only():
     """Auditability NFR: EVERY override is kept as an audit record (oldest first), not just
-    the latest — two more overrides leave a complete, ordered trail."""
+    the latest — two more overrides leave a complete, ordered trail of old→new transitions."""
     first = client.post(
         f"/api/analysis/conversations/{POSITIVE_ID}/override",
         json={"category": "out_of_scope", "actor": "reviewer-a@jaggaer.com"},
@@ -174,9 +174,10 @@ def test_override_history_is_retained_append_only():
         f"/api/analysis/conversations/{POSITIVE_ID}/override",
         json={"category": "resolved", "actor": "reviewer-b@jaggaer.com"},
     ).json()
-    # the POST responses carry the trail…
+    # the POST responses carry the trail, each entry a self-contained old→new transition
     assert second["override_history"][-2]["actor"] == "reviewer-a@jaggaer.com"
-    assert second["override_history"][-1] == {"category": "resolved", "actor": "reviewer-b@jaggaer.com", "at": second["override"]["at"]}
+    assert second["override_history"][-1]["category"] == "resolved"
+    assert second["override_history"][-1]["previous_category"] == "out_of_scope"
     # …and so does the detail record
     detail = client.get(f"/api/analysis/conversations/{POSITIVE_ID}").json()
     history = detail["analysis"]["override_history"]
@@ -184,6 +185,11 @@ def test_override_history_is_retained_append_only():
         ("out_of_scope", "reviewer-a@jaggaer.com"),
         ("resolved", "reviewer-b@jaggaer.com"),
     ]
+    # chain consistency: each transition starts where the previous one ended; the first
+    # starts from the model label (self-contained even with no earlier override recorded)
+    assert history[0]["previous_category"] is not None
+    for earlier, later in zip(history, history[1:]):
+        assert later["previous_category"] == earlier["category"]
     assert [e["at"] for e in history] == sorted(e["at"] for e in history)  # oldest first
     assert detail["analysis"]["override"]["category"] == "resolved" == history[-1]["category"]
 

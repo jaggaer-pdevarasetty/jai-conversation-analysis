@@ -61,27 +61,42 @@ _CRITICAL_TRUE = {"failed_to_resolve", "out_of_scope"}
 class EvalReport:
     total: int
     agreements: int
+    allow_missing: bool = False  # CI mode: gold entries without a local conversation are
+    #                          reported but don't fail the run (no results store there).
     confusion: dict[tuple[str, str], int] = field(default_factory=dict)  # (expected, predicted)->n
     critical_failures: list[tuple[str, str, str]] = field(default_factory=list)  # (id, exp, pred)
+    missing: list[str] = field(default_factory=list)  # gold ids with no conversation to classify
 
     @property
     def agreement(self) -> float:
         return self.agreements / self.total if self.total else 0.0
 
     def passed(self, threshold: float = DEFAULT_THRESHOLD) -> bool:
-        return self.agreement >= threshold and not self.critical_failures
+        # Incomplete coverage is a failed measurement: a gold entry that can't be evaluated
+        # must never be silently skipped (unless explicitly allowed, e.g. CI without a store).
+        return (
+            self.agreement >= threshold
+            and not self.critical_failures
+            and (self.allow_missing or not self.missing)
+        )
 
 
 def evaluate(
     classify: Classifier,
     conversations: list[Conversation] = CONVERSATIONS,
     gold: dict[str, Category] | None = None,
+    *,
+    allow_missing: bool = False,
 ) -> EvalReport:
     gold = gold if gold is not None else load_gold()
-    report = EvalReport(total=0, agreements=0)
-    for conv in conversations:
-        expected = gold.get(conv.id)
-        if expected is None:
+    report = EvalReport(total=0, agreements=0, allow_missing=allow_missing)
+    by_id = {c.id: c for c in conversations}
+    # Iterate the GOLD set (not the conversations): every labelled entry must be measured —
+    # one without a matching conversation is recorded as missing, never silently skipped.
+    for cid, expected in gold.items():
+        conv = by_id.get(cid)
+        if conv is None:
+            report.missing.append(cid)
             continue
         predicted = classify(conv, "eval", "eval").category
         report.total += 1
@@ -93,26 +108,109 @@ def evaluate(
     return report
 
 
-def main() -> int:
+def _from_stored(cc, env: str) -> Conversation:
+    """Rebuild a source-side Conversation from a stored (de-identified) CommonConversation so
+    the classifier can run on it. Primary feedback mirrors the chatdb derivation (first
+    negative wins) so signals behave exactly as in production."""
+    from .domain.models import Feedback
+
+    feedbacks = cc.feedbacks or (
+        [cc.feedback] if (cc.feedback.rating is not None or cc.feedback.comment) else []
+    )
+    primary = next((f for f in feedbacks if f.rating is False), None) or (
+        feedbacks[0] if feedbacks else Feedback()
+    )
+    return Conversation(
+        id=cc.conversation_id,
+        tenant_id="",  # de-identified store: no tenant → tenant rules skipped (as in production)
+        title=None,
+        created_at=cc.messages[0].created_at if cc.messages else "",
+        messages=cc.messages,
+        feedback=primary,
+        feedbacks=feedbacks,
+        environment=env,
+    )
+
+
+def load_eval_conversations(gold: dict[str, Category]) -> list[Conversation]:
+    """Conversations for the gold set: fixtures + REAL labelled conversations loaded from our
+    own results store (the de-identified transcripts it retained — read-only, SELECT-equivalent).
+    Without this, growing eval_gold.json would change nothing: the fixtures are the only
+    conversations evaluate() would ever see."""
+    convs: dict[str, Conversation] = {c.id: c for c in CONVERSATIONS if c.id in gold}
+    from .config import ENVIRONMENTS, settings
+
+    if settings.store_backend == "sql":
+        from .store_factory import make_store
+
+        store = make_store()
+        # Search EVERY known environment, not just those with a chat DB region configured —
+        # the results store is independent of chat-DB wiring (and prod conversations live there).
+        for env in ENVIRONMENTS:
+            for cid in gold:
+                if cid in convs:
+                    continue
+                stored = store.get_conversation(cid, env)
+                if stored is not None:
+                    convs[cid] = _from_stored(stored, env)
+    return list(convs.values())
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    from .config import settings
     from .domain.analyze import analyze as rules_analyze
     from .gemini import make_batch_analyzer
 
+    parser = argparse.ArgumentParser(
+        description="Classifier quality gate: >=85% agreement, zero resolved-mislabels, "
+        "full gold coverage, and no rules-fallback while Vertex is configured."
+    )
+    parser.add_argument(
+        "--allow-missing", action="store_true",
+        help="don't fail on gold entries not evaluable here (CI has no results store; they are "
+             "still printed). Run WITHOUT the flag where the store is reachable so real gold "
+             "entries are actually measured.",
+    )
+    args = parser.parse_args(argv)
+
     batch = make_batch_analyzer()  # Vertex when configured, else deterministic rules
+    fallbacks: list[str] = []  # gold conversations the configured model failed to label
 
     def classify(conv, run_id, now):
         records = batch([conv], run_id, now)
-        return records[0] if records else rules_analyze(conv, run_id, now)
+        rec = records[0] if records else None
+        if rec is None:
+            if settings.vertex_configured:
+                fallbacks.append(conv.id)  # model produced nothing → outage, not quality
+            return rules_analyze(conv, run_id, now)
+        if settings.vertex_configured and not str(rec.analyzer_version).startswith("vertex"):
+            fallbacks.append(conv.id)  # soft fallback: invalid model output → rules label
+        return rec
 
     gold = load_gold()
-    report = evaluate(classify, gold=gold)
+    conversations = load_eval_conversations(gold)
+    report = evaluate(classify, conversations=conversations, gold=gold, allow_missing=args.allow_missing)
     print(f"gold set: {len(gold)} labelled conversations ({GOLD_FILE.name if GOLD_FILE.exists() else 'built-in seed'})")
+    print(f"evaluable: {report.total}/{len(gold)} (fixtures + results store)")
+    if report.missing:
+        print(f"NOT EVALUABLE ({len(report.missing)}) — no conversation in the fixtures or the results store:")
+        for cid in report.missing:
+            print(f"  {cid}")
+    if fallbacks:
+        print(
+            f"MODEL UNAVAILABLE for {len(fallbacks)} conversation(s) — the gate cannot pass on a "
+            "rules fallback while Vertex is configured (production records these as failures)."
+        )
     print(f"agreement: {report.agreement:.0%} ({report.agreements}/{report.total})")
     if report.critical_failures:
         print("CRITICAL (labelled resolved):")
         for cid, exp, _ in report.critical_failures:
             print(f"  {cid[:8]} expected {exp}, got resolved")
-    print("RESULT:", "PASS" if report.passed() else "FAIL")
-    return 0 if report.passed() else 1
+    ok = report.passed() and not fallbacks
+    print("RESULT:", "PASS" if ok else "FAIL")
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

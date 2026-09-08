@@ -338,7 +338,9 @@ def list_conversations(
         "items": items[offset : offset + limit],
         "counts": store.count_by_category(region=region, env=env),
         "total": total,
-        "unanalysed": store.unanalysed_count(env),
+        # Region-scoped when a region is selected (matches the region-filtered items/counts);
+        # env-wide when listing all regions. Unknown-region failures only show in the latter.
+        "unanalysed": store.unanalysed_count(env, region=region),
         "region": region,
         "environment": env,
         "limit": limit,
@@ -736,7 +738,7 @@ def analyze_conversation(conversation_id: str, env: str | None = Query(default=N
     now = datetime.now(timezone.utc)
     records = make_batch_analyzer()([conv], f"ondemand_{uuid.uuid4().hex[:8]}", now.isoformat())
     if not records:
-        store.mark_failed(conversation_id, env)
+        store.mark_failed(conversation_id, env, conv.region)
         return problem_response(503, "Analysis failed", "model unavailable; please retry")
     store.record_analysis(conversation_id, now.isoformat(), env)
     store.upsert(records[0], deidentify(conv))
