@@ -41,6 +41,11 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - name: Unit + integration (pytest)
         run: python -m pytest -q
+      - name: Classifier quality gate (>=85% agreement, zero resolved-mislabels)
+        # --allow-missing: CI has no results store, so real (non-fixture) gold entries can't be
+        # loaded here — they are reported, not silently skipped. The full measurement (every
+        # gold entry, strict coverage) runs where the results store is reachable.
+        run: python -m app.eval --allow-missing
       - name: Contract (OpenAPI 3.1 from FastAPI)
         if: github.event_name == 'pull_request'
         run: python -c "from app.main import app; assert app.openapi()['openapi'].startswith('3.1')"

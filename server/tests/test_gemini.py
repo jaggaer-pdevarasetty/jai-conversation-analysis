@@ -31,12 +31,81 @@ def test_batch_uses_dynamic_llm_recommendation_and_confidence():
     by_id = {r.conversation_id: r for r in recs}
     for c in CONVERSATIONS[:3]:
         r = by_id[c.id]
-        assert r.model_category == "out_of_scope"
-        assert r.recommended_next_step.startswith("Custom step")  # dynamic, not a per-category lookup
+        # Calibration: an explicit thumb IS the feedback category by definition (FR-2 table),
+        # so the model's raw label only survives on conversations WITHOUT explicit feedback.
+        if c.feedback.rating is True:
+            assert r.model_category == "positive_feedback"
+        elif c.feedback.rating is False:
+            assert r.model_category == "negative_feedback"
+        else:
+            assert r.model_category == "out_of_scope"
+        # the model's dynamic step survives only where its label survived; a recalibrated
+        # category gets the enforced category's step (category and remediation must agree)
+        if r.model_category == "out_of_scope":
+            assert r.recommended_next_step.startswith("Custom step")  # dynamic, not a lookup
+        else:
+            assert not r.recommended_next_step.startswith("Custom step")
         assert r.rationale == "grounded in the transcript"
         assert r.analyzer_version.startswith("vertex:")
         # Calibration: the LLM said "high", but HIGH only survives with explicit feedback.
         assert r.confidence == ("high" if c.feedback.rating is not None else "medium")
+
+
+def test_explicit_thumbs_feedback_wins_over_the_model_label():
+    """FR-2 category table: a thumbs-down IS explicit negative feedback (and thumbs-up positive)
+    BY DEFINITION — the documented precedence is enforced even when the model returns a
+    failure/out-of-scope label (found via the live eval: the lite model under-weighted it).
+    A recalibrated category must NOT keep the step the model wrote for the rejected label."""
+    from app.domain.category import recommended_next_step
+
+    thumbs_down = next(c for c in CONVERSATIONS if c.feedback.rating is False)
+    thumbs_up = next(c for c in CONVERSATIONS if c.feedback.rating is True)
+
+    def gen_wrong(prompt: str) -> str:
+        if "what_happened" in prompt:  # deep-analysis call for the feedback conversation
+            return "{}"
+        ids = re.findall(r"conversation_id: (\S+)", prompt)
+        return json.dumps(
+            [{"conversation_id": cid, "category": "failed_to_resolve", "confidence": "high",
+              "recommended_next_step": "fix the retrieval gap", "rationale": "r"} for cid in ids]
+        )
+
+    recs = gemini.analyze_batch_vertex([thumbs_down, thumbs_up], "run", "t", generate=gen_wrong)
+    assert [r.model_category for r in recs] == ["negative_feedback", "positive_feedback"]
+    # category and remediation must agree: the model's step (written for failed_to_resolve)
+    # is replaced by the enforced category's step, not kept alongside the new label
+    assert [r.recommended_next_step for r in recs] == [
+        recommended_next_step("negative_feedback"),
+        recommended_next_step("positive_feedback"),
+    ]
+
+
+def test_mixed_thumbs_ratings_are_left_to_the_model():
+    """ADR-0022 multi-feedback: when a conversation has BOTH a thumbs-down and a later
+    thumbs-up, the deterministic guard stands down — the model sees the full feedback
+    summary and its judgement (either way) must survive."""
+    from dataclasses import replace
+
+    from app.domain.models import Feedback
+
+    base = next(c for c in CONVERSATIONS if c.feedback.rating is None)
+    mixed = replace(
+        base,
+        feedback=Feedback(rating=False, comment="wrong"),
+        feedbacks=[Feedback(rating=False, comment="wrong"), Feedback(rating=True)],
+    )
+
+    def gen(prompt: str) -> str:
+        if "what_happened" in prompt:
+            return "{}"
+        return json.dumps(
+            [{"conversation_id": mixed.id, "category": "resolved", "confidence": "medium",
+              "recommended_next_step": "model step", "rationale": "later thumb corrected it"}]
+        )
+
+    rec = gemini.analyze_batch_vertex([mixed], "run", "t", generate=gen)[0]
+    assert rec.model_category == "resolved"  # NOT forced to negative_feedback
+    assert rec.recommended_next_step == "model step"  # model's step kept (no recalibration)
 
 
 def test_high_confidence_requires_explicit_feedback():

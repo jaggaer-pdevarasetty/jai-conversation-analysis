@@ -61,6 +61,7 @@ _failed = Table(
     "failed", _metadata,
     Column("conversation_id", String, primary_key=True),
     Column("environment", String, primary_key=True, nullable=False, server_default="uit"),
+    Column("region", String, server_default=""),  # source region ("" = unknown) — regional backlog
 )
 _analyze_event = Table(
     "analyze_event", _metadata,
@@ -68,6 +69,19 @@ _analyze_event = Table(
     Column("conversation_id", String, index=True),
     Column("environment", String, index=True, server_default="uit"),
     Column("at", String),  # ISO timestamp; daily cap counts by date prefix
+)
+# Append-only override audit trail (J1-93353 auditability): every human override is retained
+# as a self-contained old→new transition, oldest first — rows are only ever INSERTed, never
+# updated or deleted.
+_override_event = Table(
+    "override_event", _metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("conversation_id", String, index=True),
+    Column("environment", String, index=True, server_default="uit"),
+    Column("category", String),
+    Column("actor", String),
+    Column("at", String),
+    Column("previous_category", String),  # effective category before this override
 )
 
 
@@ -124,8 +138,11 @@ _MIGRATION = [
     "UPDATE conversation SET environment='uit' WHERE environment IS NULL",
     "ALTER TABLE failed ADD COLUMN IF NOT EXISTS environment VARCHAR DEFAULT 'uit'",
     "UPDATE failed SET environment='uit' WHERE environment IS NULL",
+    "ALTER TABLE failed ADD COLUMN IF NOT EXISTS region VARCHAR DEFAULT ''",
+    "UPDATE failed SET region='' WHERE region IS NULL",
     "ALTER TABLE analyze_event ADD COLUMN IF NOT EXISTS environment VARCHAR DEFAULT 'uit'",
     "UPDATE analyze_event SET environment='uit' WHERE environment IS NULL",
+    "ALTER TABLE override_event ADD COLUMN IF NOT EXISTS previous_category VARCHAR",
 ]
 # Promote the primary key to (conversation_id, environment) — guarded so it runs once and only
 # on a table whose PK is still single-column (fresh tables already have the composite PK).
@@ -183,13 +200,14 @@ class SqlResultStore:
             conn.execute(delete(_failed).where(
                 _failed.c.conversation_id == record.conversation_id, _failed.c.environment == env))
 
-    def mark_failed(self, conversation_id: str, env: str = "uit") -> None:
+    def mark_failed(self, conversation_id: str, env: str = "uit", region: str = "") -> None:
         if self.is_analysed(conversation_id, env):
             return
         with self._engine.begin() as conn:
             conn.execute(delete(_failed).where(
                 _failed.c.conversation_id == conversation_id, _failed.c.environment == env))
-            conn.execute(_failed.insert().values(conversation_id=conversation_id, environment=env))
+            conn.execute(_failed.insert().values(
+                conversation_id=conversation_id, environment=env, region=region or ""))
 
     def is_analysed(self, conversation_id: str, env: str = "uit") -> bool:
         with self._engine.begin() as conn:
@@ -211,11 +229,40 @@ class SqlResultStore:
         record = self.get_analysis(conversation_id, env)
         if record is None:
             return None
-        record.override = Override(category=category, actor=actor, at=datetime.now(timezone.utc).isoformat())
+        previous = record.category  # effective before this override (model label or prior override)
+        record.override = Override(
+            category=category, actor=actor, at=datetime.now(timezone.utc).isoformat(),
+            previous_category=previous,
+        )
         record.recommended_next_step = recommended_next_step(record.category)
         with self._engine.begin() as conn:
             self._put(conn, _analysis, conversation_id, env, _rec_to_row(record))
+            conn.execute(_override_event.insert().values(
+                conversation_id=conversation_id, environment=env,
+                category=category, actor=actor, at=record.override.at,
+                previous_category=previous))
         return record
+
+    def override_events(self, conversation_id: str, env: str = "uit") -> list[Override]:
+        """Full override history for a conversation, oldest first (append-only audit table)."""
+        with self._engine.begin() as conn:
+            rows = conn.execute(
+                select(
+                    _override_event.c.category,
+                    _override_event.c.actor,
+                    _override_event.c.at,
+                    _override_event.c.previous_category,
+                )
+                .where(
+                    _override_event.c.conversation_id == conversation_id,
+                    _override_event.c.environment == env,
+                )
+                .order_by(_override_event.c.id)
+            ).all()
+        return [
+            Override(category=cat, actor=actor, at=at, previous_category=prev)
+            for cat, actor, at, prev in rows
+        ]
 
     def get_analysis(self, conversation_id: str, env: str = "uit") -> AnalysisRecord | None:
         with self._engine.begin() as conn:
@@ -272,11 +319,14 @@ class SqlResultStore:
                     counts[cat] = n
         return counts
 
-    def unanalysed_count(self, env: str = "uit") -> int:
+    def unanalysed_count(self, env: str = "uit", region: str | None = None) -> int:
+        """Failed/unanalysed conversations. Region-scoped when `region` is given (unknown-region
+        failures — region='' — only appear in the env-wide count, never a single region's)."""
+        stmt = select(func.count()).select_from(_failed).where(_failed.c.environment == env)
+        if region is not None:
+            stmt = stmt.where(_failed.c.region == region)
         with self._engine.begin() as conn:
-            return int(conn.execute(
-                select(func.count()).select_from(_failed).where(_failed.c.environment == env)
-            ).scalar_one())
+            return int(conn.execute(stmt).scalar_one())
 
     # rate-limit bookkeeping (on-demand analyse) ------------------------------
     def record_analysis(self, conversation_id: str, at_iso: str, env: str = "uit") -> None:

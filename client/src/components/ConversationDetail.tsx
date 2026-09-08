@@ -28,6 +28,7 @@ import {
   CATEGORIES,
   type ConversationDetail as Detail,
   fetchConversation,
+  type Message,
   overrideCategory,
 } from "../services/analysisApi";
 import { CATEGORY_META, CategoryChip, categoryLabel } from "./CategoryChip";
@@ -50,6 +51,17 @@ function totalTokens(input: number | null, output: number | null): string {
 function latency(value: number | null): string {
   if (value === null || value === undefined) return "unavailable";
   return value < 1000 ? `${value} ms` : `${(value / 1000).toFixed(1)} s`;
+}
+
+/** Per-message generation telemetry (FR-4): only values that were captured are shown; a
+ * generated message with NO captured telemetry reads "Telemetry unavailable" (AC-7), never 0. */
+function messageTelemetry(message: Message): string {
+  const parts: string[] = [];
+  if (message.ttft_ms !== null && message.ttft_ms !== undefined) parts.push(`TTFT ${latency(message.ttft_ms)}`);
+  if (message.input_tokens !== null && message.input_tokens !== undefined) parts.push(`in ${message.input_tokens.toLocaleString()} tk`);
+  if (message.output_tokens !== null && message.output_tokens !== undefined) parts.push(`out ${message.output_tokens.toLocaleString()} tk`);
+  if (message.prompt_tokens !== null && message.prompt_tokens !== undefined) parts.push(`prompt ${message.prompt_tokens.toLocaleString()} tk`);
+  return parts.length ? parts.join(" · ") : "Telemetry unavailable";
 }
 
 function feedbackLabel(rating: boolean | null): string {
@@ -196,6 +208,9 @@ export function ConversationDetail({ id, initial }: { id: string; initial?: Deta
                     <Box sx={{ mt: 0.75, px: 2, py: 1.5, borderRadius: 2.5, bgcolor: assistant ? "#FFFFFF" : "#F7F8FA", border: "1px solid", borderColor: "divider" }}>
                       <MarkdownContent>{message.content || "No message content"}</MarkdownContent>
                     </Box>
+                    {assistant && (
+                      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>{messageTelemetry(message)}</Typography>
+                    )}
                   </Box>
                 </Box>
               );
@@ -268,7 +283,22 @@ export function ConversationDetail({ id, initial }: { id: string; initial?: Deta
               <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">Analyzer</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right", overflowWrap: "anywhere" }}>{a.analyzer_version || "Not available"}</Typography></Box>
               <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">Run ID</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right", overflowWrap: "anywhere" }}>{a.run_id || "Not available"}</Typography></Box>
               <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">Analysed</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right" }}>{formatDate(a.analyzed_at)}</Typography></Box>
-              {a.override && <Alert severity="warning" sx={{ mt: 0.5 }}>Overridden by {a.override.actor} on {formatDate(a.override.at)}</Alert>}
+              {a.override && (
+                <Alert severity="warning" sx={{ mt: 0.5 }}>
+                  Overridden by {a.override.actor} on {formatDate(a.override.at)}
+                  {a.override.previous_category && ` (${categoryLabel(a.override.previous_category)} → ${categoryLabel(a.override.category)})`}
+                </Alert>
+              )}
+              {(a.override_history?.length ?? 0) > 0 && (
+                <Box sx={{ mt: 0.5 }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontWeight: 700 }}>Override audit trail</Typography>
+                  {a.override_history?.map((event, index) => (
+                    <Typography key={`${event.at}-${index}`} variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                      {index + 1}. {event.previous_category ? `${categoryLabel(event.previous_category)} → ${categoryLabel(event.category)}` : categoryLabel(event.category)} by {event.actor} on {formatDate(event.at)}
+                    </Typography>
+                  ))}
+                </Box>
+              )}
             </Stack>
             <Divider sx={{ my: 2.25 }} />
             <Typography variant="body2" sx={{ fontWeight: 750 }}>Override category</Typography>

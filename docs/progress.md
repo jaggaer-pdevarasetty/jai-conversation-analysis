@@ -1,6 +1,81 @@
 # Progress
 
-_Last updated: 2026-08-21_
+_Last updated: 2026-09-08_
+
+## Done — execution increment 21 (PR-review hardening: six review findings fixed)
+- **Real gold labels actually evaluated (eval):** `evaluate` now iterates the GOLD set (not just
+  the fixtures) and `load_eval_conversations` sources real labelled conversations from our own
+  results store (all environments — the store is independent of chat-DB wiring). A gold entry
+  with no loadable conversation is recorded as `missing` and FAILS the gate (never silently
+  skipped); CI passes `--allow-missing` explicitly because it has no results store — the full
+  measurement runs where the store is reachable.
+- **Model outages can't pass the gate (eval):** while Vertex is configured, any gold
+  conversation the model failed to label (no record, or an invalid-output rules fallback)
+  fails the gate with a loud `MODEL UNAVAILABLE` listing — an outage is not a passing measurement.
+- **Regional backlog no longer mixes regions:** `mark_failed` now records the source region
+  (callers: run/queue/on-demand analyse), and `unanalysed_count(env, region=...)` scopes the
+  count. The dashboard overview, pooled list, and stats/report all scope `unanalysed` to the
+  selected region; unknown-region failures (batch-level, region unavailable) appear only in the
+  all-regions count. Also fixed: run failures now honour the conversation's environment (a
+  PROD conv no longer lands in the UIT failed set).
+- **Recalibrated feedback categories keep consistent actions (gemini):** when the thumbs
+  calibration guard changes the category, the recommended step is recomputed for the enforced
+  category — the model's step (written for the rejected label) is never kept.
+- **Mixed thumbs ratings left to the model (gemini):** the guard now fires only on UNAMBIGUOUS
+  feedback; a conversation with both a thumbs-down and a later thumbs-up (ADR-0022 multi-feedback)
+  is judged by the model, which sees the full feedback summary.
+- **Override audit entries are self-contained:** `override_event` (+ in-memory trail) stores
+  `previous_category` — every entry is an old→new transition; the first starts from the model
+  label. Exposed in the detail/override responses and rendered in the UI trail ("A → B by X").
+- **Dashboard contract documented:** openapi.yaml now declares the four /dashboard endpoints
+  (overview incl. the backlog fields + region scoping, tenants, users, user conversations) and
+  `Override.previous_category`.
+- Tests: server 155 passed / 4 SQL-skipped (new: region-scoped counts, old→new audit chain,
+  mixed-ratings, recalibrated step, gold coverage + store loading, model-outage gate); client
+  46 jest + tsc + lint; live Vertex eval PASS 6/6 through the real results store.
+
+_Earlier: 2026-09-07 (J1-93353 NFR completion)_
+
+## Done — execution increment 20 (J1-93353 NFR completion: record, override audit, retry, eval gate)
+Four partially-done J1-93353 requirements completed to done:
+- **Full reviewer record (FR-4 → 100%):** `GET /conversations/{id}` messages now carry
+  **per-message telemetry** (`input_tokens`, `output_tokens`, `prompt_tokens`, `ttft_ms`;
+  null = not captured, AC-7) alongside the conversation aggregate. The conversation detail UI
+  renders a telemetry line under every assistant message ("Telemetry unavailable" when absent).
+  OpenAPI `Message` schema updated.
+- **Human override + audit (NFR → 100%):** overrides are now an **append-only audit trail**,
+  not just the latest decision. New `override_event` table (SQL store; insert-only, survives
+  restarts) + in-memory equivalent; full history returned in the detail record and the override
+  response (`override_history`, oldest first) and shown in the UI's Decision & audit panel.
+  Env-isolated per (conversation_id, environment).
+- **Retry + visible unanalysed counts (NFR → 100%):** (a) a NEW sweep/analysis run now
+  **retries dead-lettered conversations** (`queue.retry_dead(env)` releases them with a fresh
+  attempt budget — previously a dead item was never retried again within a running process);
+  (b) the dashboard overview's `unanalysed` is now the **true total (pending + failed)** with
+  explicit `unanalysed_pending` / `unanalysed_failed` breakdown — previously only failed
+  attempts were counted, silently excluding never-swept conversations. Overview banner updated
+  to show both populations.
+- **≥85% accuracy gate (NFR → infrastructure 100%, gold set growth is a human task):** the
+  gold set moved to a version-controlled **`server/eval_gold.json`** (reviewers append labelled
+  real conversations without code changes; invalid entries fail loudly); `python -m app.eval`
+  wired into **CI as a hard gate** (agreement ≥85% + zero resolved-mislabels). Growing the set
+  to 100–200 human-labelled real conversations remains the team's "Next" item — it needs human
+  reviewers, not code.
+- **Classifier calibration fix (found BY the new gate):** running the eval live against Vertex
+  exposed a real regression — the default `gemini-2.5-flash-lite` agreed on only **50%** of the
+  gold set (positive/negative feedback and out_of_scope all collapsing into failed_to_resolve;
+  no critical resolved-mislabels). Fixed by (a) rendering the explicit thumbs feedback (all
+  turns, PII-scrubbed) into the Tier-1 prompt instead of relying on the `signals=` repr, (b)
+  sharpening the out_of_scope-vs-failed boundary in the prompt ("I can't perform that action" +
+  manual workaround = out_of_scope), and (c) enforcing the documented "explicit thumbs wins"
+  precedence deterministically in `_record` (a thumb is positive/negative feedback BY DEFINITION
+  per the FR-2 table). Live Vertex eval now **100% (6/6) PASS**; fixed a pre-existing dead
+  import (`make_classifier`) that had kept the eval CLI from running at all.
+- Tests: server +6 (override history memory/SQL, retry_dead + env isolation, per-message
+  telemetry, gold-file loading/validation), client +2 (per-message telemetry, audit trail);
+  `ci.yml` gained the classifier quality gate step.
+
+_Earlier: 2026-08-21 (multi-feedback + root-cause grouping / ADR-0022)_
 
 ## Multi-feedback capture + root-cause/knowledge-gap grouping (ADR-0022) — feat/insights-multi-feedback
 - **Capture ALL feedback per conversation** (was one): `feedbacks: list[Feedback]` on Conversation/

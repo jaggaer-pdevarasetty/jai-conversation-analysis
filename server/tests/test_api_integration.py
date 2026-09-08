@@ -115,12 +115,30 @@ def test_detail_has_analysis_messages_feedback_and_metrics():
     assert set(body["metrics"]) == {"ttft_ms", "input_tokens", "output_tokens", "prompt_tokens"}
 
 
+def test_detail_carries_per_message_telemetry():
+    """FR-4 full record: each message exposes its own token counts + TTFT — not just the
+    conversation aggregate. Generated (assistant) messages carry values; user turns are null."""
+    body = client.get(f"/api/analysis/conversations/{POSITIVE_ID}").json()
+    assistant = next(m for m in body["messages"] if m["role"] == "assistant")
+    assert assistant["input_tokens"] == 130
+    assert assistant["output_tokens"] == 48
+    assert assistant["prompt_tokens"] == 120
+    assert assistant["ttft_ms"] == 340
+    user = next(m for m in body["messages"] if m["role"] == "user")
+    assert user["input_tokens"] is None and user["ttft_ms"] is None
+
+
 def test_missing_telemetry_is_null_not_zero():
-    """AC-7: missing latency/token telemetry shown as unavailable (null), not zero."""
+    """AC-7: missing latency/token telemetry shown as unavailable (null), not zero —
+    conversation-level AND per-message."""
     res = client.get(f"/api/analysis/conversations/{NON_ENGLISH_MISSING_TELEMETRY_ID}")
-    metrics = res.json()["metrics"]
-    assert metrics["ttft_ms"] is None
-    assert metrics["input_tokens"] is None
+    body = res.json()
+    assert body["metrics"]["ttft_ms"] is None
+    assert body["metrics"]["input_tokens"] is None
+    assert all(
+        m["input_tokens"] is None and m["ttft_ms"] is None and m["prompt_tokens"] is None
+        for m in body["messages"]
+    )
 
 
 def test_non_english_conversation_is_categorised():
@@ -143,6 +161,37 @@ def test_human_override_updates_effective_category_and_audits():
     detail = client.get(f"/api/analysis/conversations/{POSITIVE_ID}").json()
     assert detail["analysis"]["category"] == "out_of_scope"
     assert detail["analysis"]["model_category"] == "positive_feedback"
+
+
+def test_override_history_is_retained_append_only():
+    """Auditability NFR: EVERY override is kept as an audit record (oldest first), not just
+    the latest — two more overrides leave a complete, ordered trail of old→new transitions."""
+    first = client.post(
+        f"/api/analysis/conversations/{POSITIVE_ID}/override",
+        json={"category": "out_of_scope", "actor": "reviewer-a@jaggaer.com"},
+    ).json()
+    second = client.post(
+        f"/api/analysis/conversations/{POSITIVE_ID}/override",
+        json={"category": "resolved", "actor": "reviewer-b@jaggaer.com"},
+    ).json()
+    # the POST responses carry the trail, each entry a self-contained old→new transition
+    assert second["override_history"][-2]["actor"] == "reviewer-a@jaggaer.com"
+    assert second["override_history"][-1]["category"] == "resolved"
+    assert second["override_history"][-1]["previous_category"] == "out_of_scope"
+    # …and so does the detail record
+    detail = client.get(f"/api/analysis/conversations/{POSITIVE_ID}").json()
+    history = detail["analysis"]["override_history"]
+    assert [(e["category"], e["actor"]) for e in history[-2:]] == [
+        ("out_of_scope", "reviewer-a@jaggaer.com"),
+        ("resolved", "reviewer-b@jaggaer.com"),
+    ]
+    # chain consistency: each transition starts where the previous one ended; the first
+    # starts from the model label (self-contained even with no earlier override recorded)
+    assert history[0]["previous_category"] is not None
+    for earlier, later in zip(history, history[1:]):
+        assert later["previous_category"] == earlier["category"]
+    assert [e["at"] for e in history] == sorted(e["at"] for e in history)  # oldest first
+    assert detail["analysis"]["override"]["category"] == "resolved" == history[-1]["category"]
 
 
 def test_override_rejects_unknown_category():

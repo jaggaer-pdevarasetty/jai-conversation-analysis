@@ -105,19 +105,31 @@ def overview(store: CommonStore, region: str | None = None, env: str = "uit") ->
         conversations_n += n
     records = store.list(region=region, env=env)
     counts = store.count_by_category(region=region, env=env)
+    analysed = sum(counts.values())
+    # Region-scoped when a region is selected: the backlog breakdown must match the region-
+    # filtered source/analysed totals, not the whole environment's failures. Failures whose
+    # source region is unknown ("") only appear in the all-regions (env-wide) count.
+    failed = store.unanalysed_count(env=env, region=region)
     telemetry_complete = sum(
         record.metrics.ttft_ms is not None
         and record.metrics.input_tokens is not None
         and record.metrics.output_tokens is not None
         for record in records
     )
+    # Unanalysed visibility (J1-93353 reliability NFR): the count must cover EVERYTHING not yet
+    # analysed — both failed attempts (dead-lettered, retried next run) and conversations that
+    # are simply pending (eligible but never swept). Showing only the failed set would silently
+    # exclude the pending population, which is exactly what the NFR forbids.
+    pending = max(conversations_n - analysed - failed, 0)
     return {
         "region": region,
         "tenants": len(tenant_ids),
         "users": len(user_ids),
         "conversations": conversations_n,
-        "analysed": sum(counts.values()),
-        "unanalysed": store.unanalysed_count(env=env),
+        "analysed": analysed,
+        "unanalysed": pending + failed,  # true in-scope total (pending + failed)
+        "unanalysed_pending": pending,   # eligible, never analysed
+        "unanalysed_failed": failed,     # attempted, dead-lettered → retried next run
         "counts": counts,
         "telemetry_complete": telemetry_complete,
         "telemetry_total": len(records),

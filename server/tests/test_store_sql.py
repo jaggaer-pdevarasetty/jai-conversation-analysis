@@ -31,7 +31,7 @@ def store() -> SqlResultStore:
         pytest.skip(f"Postgres not reachable at TEST_DATABASE_URL: {type(exc).__name__}")
     engine = create_engine(PG_URL)
     with engine.begin() as conn:
-        conn.execute(text("TRUNCATE analysis, conversation, failed"))
+        conn.execute(text("TRUNCATE analysis, conversation, failed, override_event"))
     engine.dispose()
     return s
 
@@ -60,6 +60,30 @@ def test_override_is_persisted(store: SqlResultStore):
     assert rec.model_category == "positive_feedback"  # original retained (audit)
 
 
-def test_failed_count_is_visible(store: SqlResultStore):
-    store.mark_failed("unanalysed-id")
-    assert store.unanalysed_count() == 1
+def test_override_audit_trail_is_persisted_append_only(store: SqlResultStore):
+    """Auditability NFR: every override event lands in the append-only override_event table
+    and survives a fresh connection — not just the latest override on the record. Each entry
+    carries its previous category (self-contained old→new transition)."""
+    record = analyze(POSITIVE, "run")
+    store.upsert(record, deidentify(POSITIVE))
+    store.set_override(POSITIVE.id, "out_of_scope", "reviewer-a")
+    store.set_override(POSITIVE.id, "failed_to_resolve", "reviewer-b")
+    fresh = SqlResultStore(PG_URL)  # new connection → real persistence, oldest first
+    events = fresh.override_events(POSITIVE.id)
+    assert [(e.category, e.actor) for e in events] == [
+        ("out_of_scope", "reviewer-a"),
+        ("failed_to_resolve", "reviewer-b"),
+    ]
+    assert events[0].previous_category == record.model_category  # transition starts at the model label
+    assert events[1].previous_category == "out_of_scope"
+    assert fresh.override_events("never-overridden") == []
+
+
+def test_failed_count_is_visible_and_region_scoped(store: SqlResultStore):
+    store.mark_failed("unanalysed-id", region="us")
+    store.mark_failed("other-id", region="eu")
+    store.mark_failed("unknown-region-id")  # batch-level failure — region unknown
+    assert store.unanalysed_count() == 3  # env-wide
+    assert store.unanalysed_count(region="us") == 1
+    assert store.unanalysed_count(region="eu") == 1
+    assert store.unanalysed_count(region="uk") == 0  # unknown-region rows excluded per-region

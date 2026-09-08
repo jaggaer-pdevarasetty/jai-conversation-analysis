@@ -88,6 +88,10 @@ export interface Message {
   sequence_num: number;
   model: string | null;
   created_at: string;
+  input_tokens?: number | null;   // per-message telemetry (FR-4); null = not captured (AC-7)
+  output_tokens?: number | null;
+  prompt_tokens?: number | null;
+  ttft_ms?: number | null;
 }
 
 export interface DeepAnalysis {
@@ -157,7 +161,8 @@ export interface ConversationDetail {
     rationale: string;
     signals?: Signals;
     status: string;
-    override: { category: string; actor: string; at: string } | null;
+    override: { category: string; actor: string; at: string; previous_category?: string | null } | null;
+    override_history?: { category: string; actor: string; at: string; previous_category?: string | null }[]; // append-only audit
     run_id?: string;
     analyzed_at: string;
     analyzer_version?: string;

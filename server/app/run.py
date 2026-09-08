@@ -82,7 +82,9 @@ def run_analysis(
         for conv in eligible:
             record = by_id.get(conv.id)
             if record is None:
-                store.mark_failed(conv.id)  # retried next run; count stays visible (AC-9)
+                # retried next run; count stays visible (AC-9). Region recorded so regional
+                # dashboards can scope the backlog (env too — a PROD conv must not land in UIT).
+                store.mark_failed(conv.id, conv.environment or "uit", conv.region)
                 failed += 1
             else:
                 store.upsert(record, deidentify(conv))

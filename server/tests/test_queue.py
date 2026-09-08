@@ -70,3 +70,34 @@ def test_worker_processes_then_never_reruns(monkeypatch):
     # re-enqueue analysed ids → skipped (idempotent, no loop)
     assert q.enqueue(IDS) == []
     assert store.unanalysed_count() == 0
+
+
+def test_dead_letter_is_retried_by_the_next_run():
+    """Reliability NFR (J1-93353): a conversation that dead-letters is NOT lost — the next
+    run releases it (retry_dead) and the sweep can enqueue it again, fresh attempt budget."""
+    store = CommonStore()
+    q = AnalysisQueue(store, _rules_batch, workers=0, max_attempts=1)
+    cid = IDS[0]
+    q.enqueue([cid])
+    q._retry_or_dead([("uit", cid)], region="us")  # fails → dead-letter, region recorded
+    assert q.stats(env="uit")["dead_letter"] == 1
+    assert store.unanalysed_count("uit") == 1  # visible, not silently excluded
+    assert store.unanalysed_count("uit", region="us") == 1  # region-scoped backlog stays correct
+    # dead items are not re-enqueued by a plain enqueue (no loop)…
+    assert q.enqueue([cid]) == []
+    # …but the NEXT run releases them and they become eligible again
+    assert q.retry_dead("uit") == 1
+    assert q.stats(env="uit")["dead_letter"] == 0
+    assert q.enqueue([cid]) == [cid]
+
+
+def test_retry_dead_is_isolated_per_environment():
+    store = CommonStore()
+    q = AnalysisQueue(store, _rules_batch, workers=0, max_attempts=1)
+    q.enqueue([IDS[0]], env="uit")
+    q.enqueue([IDS[1]], env="prod")
+    q._retry_or_dead([("uit", IDS[0]), ("prod", IDS[1])])
+    assert q.retry_dead("uit") == 1  # releases ONLY the UIT dead item
+    assert q.stats(env="uit")["dead_letter"] == 0
+    assert q.stats(env="prod")["dead_letter"] == 1
+    assert q.enqueue([IDS[1]], env="prod") == []  # PROD dead stays locked until its own run
