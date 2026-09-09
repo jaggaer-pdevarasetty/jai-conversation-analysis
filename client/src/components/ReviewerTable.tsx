@@ -152,7 +152,7 @@ export function ReviewerTable() {
       {unanalysed > 0 && (
         <Alert severity="warning">
           <AlertTitle>{unanalysed} {unanalysed === 1 ? "conversation is" : "conversations are"} not yet analysed</AlertTitle>
-          They remain queued and will be retried during the next scheduled run.
+          They remain queued and will be retried during the next analysis run.
         </Alert>
       )}
 

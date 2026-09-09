@@ -477,15 +477,20 @@ components:
           items: { $ref: '#/components/schemas/Override' }
     DashboardOverview:
       type: object
-      description: Authorised admin aggregates. `unanalysed` = pending + failed (true total).
+      description: >-
+        Authorised admin aggregates. The "waiting" backlog counts only ANALYSABLE
+        conversations (non-deleted AND with a transcript); empty-transcript conversations can
+        never be analysed (empty-transcript guard) and are surfaced separately.
       properties:
         region: { type: [string, 'null'] }
         tenants: { type: integer }
         users: { type: integer }
-        conversations: { type: integer }
+        conversations: { type: integer, description: All non-deleted source conversations. }
+        analysable: { type: integer, description: Source conversations that have a transcript — the population that can ever be analysed. }
+        empty_transcripts: { type: integer, description: Source conversations with no messages — permanently excluded from analysis and from the backlog. }
         analysed: { type: integer }
-        unanalysed: { type: integer, description: True in-scope total (pending + failed). }
-        unanalysed_pending: { type: integer, description: Eligible, never analysed. Region-scoped when a region is selected. }
+        unanalysed: { type: integer, description: True in-scope total (pending + failed), over the analysable population. }
+        unanalysed_pending: { type: integer, description: Analysable conversations not yet analysed (any age; includes fresh ones awaiting the 5-minute inactivity window). Region-scoped when a region is selected. }
         unanalysed_failed: { type: integer, description: Attempted, dead-lettered — retried on the next run. Region-scoped when a region is selected (unknown-region failures count only in the all-regions total). }
         counts: { type: object, additionalProperties: { type: integer } }
         telemetry_complete: { type: integer }

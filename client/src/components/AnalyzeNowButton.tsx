@@ -141,7 +141,7 @@ export function AnalyzeNowButton({
           {phase === "fetching" && (
             <Stack direction="row" spacing={1.5} alignItems="center" sx={{ py: 1 }}>
               <CircularProgress size={22} />
-              <Typography>Fetching new / unanalyzed conversations in {scopeLabel}…</Typography>
+              <Typography>Fetching conversations waiting for analysis in {scopeLabel}…</Typography>
             </Stack>
           )}
 
@@ -149,21 +149,23 @@ export function AnalyzeNowButton({
             all.count > 0 ? (
               <Stack spacing={1.5}>
                 <Typography>
-                  Found <b>{all.count}</b> new / unanalyzed conversation{all.count === 1 ? "" : "s"} in {scopeLabel}.
+                  <b>{all.count}</b> conversation{all.count === 1 ? " is" : "s are"} waiting for analysis in {scopeLabel}
+                  {" "}(not yet analysed, of any age).
                 </Typography>
                 {/* Feedback pending is by construction a subset of all pending (feedback_only just
-                    narrows the same eligible set), so Normal = all - feedback >= 0; max(0,…) is a
-                    defensive guard. The extra feedback fetch runs in parallel (Promise.all) with the
-                    all fetch, so it adds no latency — it's what powers this breakdown. */}
+                    narrows the same eligible set), so Without-feedback = all - feedback >= 0;
+                    max(0,…) is a defensive guard. The extra feedback fetch runs in parallel
+                    (Promise.all) with the all fetch, so it adds no latency — it's what powers
+                    this breakdown. */}
                 <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                   <Chip size="small" color="primary" label={`Total ${all.count}`} />
-                  <Chip size="small" color="secondary" variant="outlined" label={`New feedback ${feedback.count}`} />
-                  <Chip size="small" variant="outlined" label={`Normal ${Math.max(0, all.count - feedback.count)}`} />
+                  <Chip size="small" color="secondary" variant="outlined" label={`With feedback ${feedback.count}`} />
+                  <Chip size="small" variant="outlined" label={`Without feedback ${Math.max(0, all.count - feedback.count)}`} />
                 </Stack>
                 <PendingPreview data={all} showRegions={!region} />
               </Stack>
             ) : (
-              <Typography>Everything is already analyzed in {scopeLabel} — no new conversations found.</Typography>
+              <Typography>Everything eligible is already analysed in {scopeLabel} — nothing is waiting for analysis.</Typography>
             )
           )}
 

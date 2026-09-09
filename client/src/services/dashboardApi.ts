@@ -5,9 +5,11 @@ export interface Overview {
   region?: string | null;
   tenants: number;
   users: number;
-  conversations: number;
+  conversations: number; // all non-deleted source records
+  analysable?: number; // has a transcript → can ever be analysed (backlog denominator)
+  empty_transcripts?: number; // no messages → permanently excluded from analysis/backlog
   analysed: number;
-  unanalysed: number; // true total: pending (never analysed) + failed (dead-lettered)
+  unanalysed: number; // true total: pending (analysable, never analysed) + failed (dead-lettered)
   unanalysed_pending?: number;
   unanalysed_failed?: number;
   counts: Record<string, number>;

@@ -87,22 +87,42 @@ def overview(store: CommonStore, region: str | None = None, env: str = "uit") ->
     tenant_ids: set[str] = set()
     user_ids: set[str] = set()
     conversations_n = 0
+    analysable_n = 0
 
     def _one(label):
+        # One round trip: total non-deleted conversations AND the subset that actually has a
+        # transcript. Message-less ("empty") conversations can NEVER be analysed (the
+        # empty-transcript guard skips them), so they must not sit in the "waiting" backlog.
         with _connect(label, env) as (c, sch):
-            table = "threads" if _platform_layout(c, sch) else "conversations"
-            where = "" if table == "threads" else " where is_deleted = false"
-            pairs = c.execute(text(f'select distinct tenant_id, user_id from "{sch}".{table}{where}')).all()
-            n = int(c.execute(text(f'select count(*) from "{sch}".{table}{where}')).scalar_one())
-            return pairs, n
+            if _platform_layout(c, sch):
+                pairs = c.execute(
+                    text(f'select distinct tenant_id, user_id from "{sch}".threads')
+                ).all()
+                row = c.execute(text(
+                    f'select count(*), count(*) filter (where exists '
+                    f'(select 1 from "{sch}".thread_messages tm where tm.thread_id = threads.id)) '
+                    f'from "{sch}".threads'
+                )).one()
+            else:
+                pairs = c.execute(
+                    text(f'select distinct tenant_id, user_id from "{sch}".conversations '
+                         f'where is_deleted = false')
+                ).all()
+                row = c.execute(text(
+                    f'select count(*), count(*) filter (where exists '
+                    f'(select 1 from "{sch}".messages m where m.conversation_id = conversations.id)) '
+                    f'from "{sch}".conversations where is_deleted = false'
+                )).one()
+            return pairs, int(row[0]), int(row[1])
 
-    for pairs, n in _map_regions(_scan_labels(region, env), _one):
+    for pairs, total, analysable in _map_regions(_scan_labels(region, env), _one):
         for r in pairs:
             if r[0] is not None:
                 tenant_ids.add(str(r[0]))
             if r[1] is not None:
                 user_ids.add(str(r[1]))
-        conversations_n += n
+        conversations_n += total
+        analysable_n += analysable
     records = store.list(region=region, env=env)
     counts = store.count_by_category(region=region, env=env)
     analysed = sum(counts.values())
@@ -118,17 +138,21 @@ def overview(store: CommonStore, region: str | None = None, env: str = "uit") ->
     )
     # Unanalysed visibility (J1-93353 reliability NFR): the count must cover EVERYTHING not yet
     # analysed — both failed attempts (dead-lettered, retried next run) and conversations that
-    # are simply pending (eligible but never swept). Showing only the failed set would silently
-    # exclude the pending population, which is exactly what the NFR forbids.
-    pending = max(conversations_n - analysed - failed, 0)
+    # are simply pending (never swept). The backlog maths uses the ANALYSABLE population only:
+    # empty-transcript conversations are surfaced separately (empty_transcripts) so the waiting
+    # number can actually reach zero instead of crying wolf forever. `analysed` may exceed
+    # `analysable` (rows whose source conversation was deleted/emptied after analysis) → clamp.
+    pending = max(analysable_n - analysed - failed, 0)
     return {
         "region": region,
         "tenants": len(tenant_ids),
         "users": len(user_ids),
-        "conversations": conversations_n,
+        "conversations": conversations_n,          # all non-deleted source records (stat card)
+        "analysable": analysable_n,                # has a transcript → can ever be analysed
+        "empty_transcripts": conversations_n - analysable_n,  # never analysable (guard)
         "analysed": analysed,
         "unanalysed": pending + failed,  # true in-scope total (pending + failed)
-        "unanalysed_pending": pending,   # eligible, never analysed
+        "unanalysed_pending": pending,   # analysable, never analysed (any age)
         "unanalysed_failed": failed,     # attempted, dead-lettered → retried next run
         "counts": counts,
         "telemetry_complete": telemetry_complete,

@@ -42,11 +42,14 @@ describe("AnalyzeNowButton", () => {
     await userEvent.click(screen.getByRole("button", { name: /analyze/i }));
     expect(mockFetch).toHaveBeenCalledWith("", "all");
     expect(mockFetch).toHaveBeenCalledWith("", "feedback");
-    expect(await screen.findByText(/new \/ unanalyzed conversation/i)).toBeInTheDocument();
-    // breakdown: total 3, new feedback 1, normal 2
+    // "waiting for analysis", NOT "new" — the count is unanalysed conversations of ANY age,
+    // not conversations created recently (wording fix: it read like a created-date count).
+    expect(await screen.findByText(/waiting for analysis in all regions/i)).toBeInTheDocument();
+    expect(screen.getByText(/\(not yet analysed, of any age\)/i)).toBeInTheDocument();
+    // breakdown: total 3, with feedback 1, without feedback 2
     expect(screen.getByText("Total 3")).toBeInTheDocument();
-    expect(screen.getByText("New feedback 1")).toBeInTheDocument();
-    expect(screen.getByText("Normal 2")).toBeInTheDocument();
+    expect(screen.getByText("With feedback 1")).toBeInTheDocument();
+    expect(screen.getByText("Without feedback 2")).toBeInTheDocument();
     expect(screen.getByText("US: 2")).toBeInTheDocument();
     expect(screen.getByText("Approvals")).toBeInTheDocument();
     const start = await screen.findByRole("button", { name: /start analysis/i });
@@ -56,11 +59,11 @@ describe("AnalyzeNowButton", () => {
     expect(await screen.findByText(/analysis started/i)).toBeInTheDocument();
   });
 
-  it("UIT: offers no Start button when there is nothing new to analyse", async () => {
+  it("UIT: offers no Start button when there is nothing waiting for analysis", async () => {
     mockFetch.mockResolvedValue({ count: 0, ids: [], by_region: {}, items: [] });
     render(<AnalyzeNowButton />);
     await userEvent.click(screen.getByRole("button", { name: /analyze/i }));
-    expect(await screen.findByText(/everything is already analyzed/i)).toBeInTheDocument();
+    expect(await screen.findByText(/everything eligible is already analysed/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /start analysis/i })).not.toBeInTheDocument();
     expect(mockTrigger).not.toHaveBeenCalled();
   });
