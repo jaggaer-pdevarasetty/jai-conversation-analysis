@@ -135,6 +135,8 @@ export default function OverviewPage() {
 
   const analysed = data.total;
   const sourceConversations = overview?.conversations ?? analysed;
+  const analysableConversations = overview?.analysable ?? sourceConversations;
+  const emptyTranscripts = overview?.empty_transcripts ?? 0;
   const positive = (data.counts.resolved ?? 0) + (data.counts.positive_feedback ?? 0);
   const attention =
     (data.counts.failed_to_resolve ?? 0) +
@@ -145,7 +147,9 @@ export default function OverviewPage() {
   ).length;
   const telemetryTotal = overview?.telemetry_total ?? data.items.length;
   const telemetryCoverage = telemetryTotal ? Math.round((coverageItems / telemetryTotal) * 100) : 0;
-  const analysisCoverage = sourceConversations ? Math.round((analysed / sourceConversations) * 100) : 0;
+  // Coverage against the ANALYSABLE population: empty-transcript conversations can never be
+  // analysed, so counting them in the denominator pins coverage below 100% forever.
+  const analysisCoverage = analysableConversations ? Math.min(100, Math.round((analysed / analysableConversations) * 100)) : 0;
   const lowConfidence = data.items.filter((item) => item.confidence === "low").length;
   const overrides = data.items.filter((item) => item.overridden).length;
 
@@ -200,9 +204,14 @@ export default function OverviewPage() {
           return (
             <Alert severity="warning">
               <AlertTitle>{waiting} {waiting === 1 ? "conversation is" : "conversations are"} waiting for analysis</AlertTitle>
-              {pending > 0 && `${pending.toLocaleString()} new ${pending === 1 ? "conversation has" : "conversations have"} not been analysed yet. `}
+              {pending > 0 && `${pending.toLocaleString()} analysable ${pending === 1 ? "conversation has" : "conversations have"} not been analysed yet. `}
               {failed > 0 && `${failed.toLocaleString()} failed ${failed === 1 ? "analysis is" : "analyses are"} retained and will be retried on the next analysis run.`}
               {pending === 0 && failed === 0 && "Conversations without an analysis remain visible here rather than silently excluded."}
+              {emptyTranscripts > 0 && (
+                <Typography variant="caption" sx={{ display: "block", mt: 0.5 }}>
+                  Excludes {emptyTranscripts.toLocaleString()} empty-transcript {emptyTranscripts === 1 ? "conversation" : "conversations"} — {emptyTranscripts === 1 ? "it has" : "they have"} no messages to analyse.
+                </Typography>
+              )}
             </Alert>
           );
         }
@@ -210,8 +219,11 @@ export default function OverviewPage() {
           <Paper sx={{ p: 2, display: "flex", alignItems: "center", gap: 1.5, bgcolor: "#F0FAF6", borderColor: "#CFEBDD" }}>
             <CheckCircleOutlineRoundedIcon color="success" />
             <Box>
-              <Typography variant="body2" sx={{ fontWeight: 750 }}>Everything analysed — retry queue clear</Typography>
-              <Typography variant="caption" color="text.secondary">No pending or failed conversations are waiting for analysis.</Typography>
+              <Typography variant="body2" sx={{ fontWeight: 750 }}>Everything analysable is done — retry queue clear</Typography>
+              <Typography variant="caption" color="text.secondary">
+                No pending or failed conversations are waiting for analysis.
+                {emptyTranscripts > 0 && ` (${emptyTranscripts.toLocaleString()} empty-transcript ${emptyTranscripts === 1 ? "conversation is" : "conversations are"} excluded — no messages to analyse.)`}
+              </Typography>
             </Box>
             {run && <Chip size="small" label={`Last run ${formatDate(run.completed_at)}`} sx={{ ml: "auto", display: { xs: "none", sm: "flex" }, bgcolor: "#FFFFFF" }} />}
           </Paper>
@@ -222,7 +234,7 @@ export default function OverviewPage() {
         <StatCard label="Tenants" value={(overview?.tenants ?? "—").toLocaleString()} helper="Organisations in the authorised directory" icon={<BusinessRoundedIcon />} />
         <StatCard label="Users" value={(overview?.users ?? "—").toLocaleString()} helper="Distinct users across tenants" icon={<GroupsOutlinedIcon />} tone="#356BB3" />
         <StatCard label="Source conversations" value={sourceConversations.toLocaleString()} helper="Available read-only conversation records" icon={<ForumOutlinedIcon />} tone="#65758B" />
-        <StatCard label="Analysed" value={analysed.toLocaleString()} helper={`${analysisCoverage}% of source conversations`} icon={<FactCheckOutlinedIcon />} tone="#16815D" />
+        <StatCard label="Analysed" value={analysed.toLocaleString()} helper={`${analysisCoverage}% of analysable conversations`} icon={<FactCheckOutlinedIcon />} tone="#16815D" />
         <StatCard label="Needs attention" value={attention.toLocaleString()} helper="Failures, negative feedback, and capability gaps" icon={<ErrorOutlineRoundedIcon />} tone="#C43D4B" />
         <StatCard label="Telemetry complete" value={`${telemetryCoverage}%`} helper={`${coverageItems.toLocaleString()} of ${telemetryTotal.toLocaleString()} analysed conversations`} icon={<SpeedRoundedIcon />} tone="#7A55B8" />
       </Box>
