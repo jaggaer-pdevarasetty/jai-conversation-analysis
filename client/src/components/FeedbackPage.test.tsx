@@ -20,7 +20,10 @@ jest.mock("next/navigation", () => ({
 
 const response: FeedbackListResponse = {
   items: [{
+    feedback_id: "4512ec35-9164-4225-a7eb-06c1a26cf652:m1",
+    feedback_message_id: "m1",
     conversation_id: "4512ec35-9164-4225-a7eb-06c1a26cf652",
+    region: "us",
     category: "negative_feedback",
     model_category: "negative_feedback",
     confidence: "high",
@@ -61,6 +64,7 @@ describe("FeedbackPage", () => {
   it("sends filters to the server and renders Markdown fields", async () => {
     render(<FeedbackPage />);
     expect((await screen.findByText("Broken answer")).tagName).toBe("STRONG");
+    expect(screen.getByText("US")).toBeInTheDocument();
     expect(screen.getByText("context").tagName).toBe("STRONG");
     await userEvent.click(screen.getByLabelText("Sentiment"));
     await userEvent.click(await screen.findByRole("option", { name: "Negative" }));
@@ -78,7 +82,42 @@ describe("FeedbackPage", () => {
   it("requests oldest conversation activity when selected", async () => {
     render(<FeedbackPage />);
     await userEvent.click(await screen.findByLabelText("Sort"));
-    await userEvent.click(await screen.findByRole("option", { name: "Oldest conversation" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Oldest feedback" }));
     await waitFor(() => expect(mockFetchFeedback).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "oldest" })));
+  });
+
+  it("renders every rated message with platform and interaction mode", async () => {
+    const first = {
+      ...response.items[0],
+      feedback_id: "conversation-1:m1",
+      feedback_message_id: "m1",
+      comment: "First wrong answer",
+      title: "Repeated feedback",
+      platform: "JI",
+      interaction_mode: "Ask",
+      agent_used: "rag",
+    };
+    const second = {
+      ...first,
+      feedback_id: "conversation-1:m2",
+      feedback_message_id: "m2",
+      comment: "Second wrong answer",
+    };
+    mockFetchFeedback.mockResolvedValueOnce({
+      ...response,
+      items: [first, second],
+      total: 2,
+      scope_total: 2,
+      negative: 2,
+    });
+
+    render(<FeedbackPage />);
+
+    expect(await screen.findByText(/First wrong answer/)).toBeInTheDocument();
+    expect(screen.getByText(/Second wrong answer/)).toBeInTheDocument();
+    expect(screen.getAllByText("Repeated feedback")).toHaveLength(2);
+    expect(screen.getAllByText("JI")).toHaveLength(2);
+    expect(screen.getAllByText(/Ask · rag/)).toHaveLength(2);
+    expect(screen.getByText(/2 matching feedback messages/i)).toBeInTheDocument();
   });
 });

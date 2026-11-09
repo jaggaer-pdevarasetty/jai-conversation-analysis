@@ -1,6 +1,31 @@
 # Progress
 
-_Last updated: 2026-09-08_
+_Last updated: 2026-09-09_
+
+## Done — execution increment 22 (review finding: honest "waiting for analysis" numbers)
+Found while reviewing DML-102103/105: comparing the Analyze dialog ("Found 69 new conversations")
+against a created-date DB query (47 for Sep 8–9) exposed two real defects:
+- **The backlog counted conversations that can NEVER be analysed.** The overview's
+  `unanalysed` used all non-deleted conversations minus analysed — but 319 of 5,323 source
+  conversations are empty transcripts (no messages), permanently excluded by the
+  empty-transcript guard. The banner claimed "315 waiting" while a sweep would process 0, and
+  the number could never reach zero. Fix: the dashboard overview now counts the **analysable**
+  population (non-deleted AND has a transcript) for the backlog maths, clamps when analysed
+  rows outlive their deleted/emptied sources, and surfaces `analysable` +
+  `empty_transcripts` explicitly. Live: waiting 315 → 0; coverage 94% → **100% of analysable**.
+- **The Analyze dialog said "new" when it meant "unanalysed".** "Found N new / unanalyzed
+  conversations" reads like a created-date count (exactly the confusion that triggered this).
+  Reworded to "N conversations are waiting for analysis (not yet analysed, of any age)";
+  breakdown chips renamed New feedback/Normal → With feedback/Without feedback; empty state
+  now "everything eligible is already analysed". Also fixed the queue-page banner's "next
+  scheduled run" → "next analysis run" (there is no scheduler — ADR-0019).
+- Overview banner now shows the exclusion note ("Excludes N empty-transcript conversations —
+  no messages to analyse") in both states; coverage card reads "% of analysable conversations".
+- Tests: new `test_dashboard_overview.py` (backlog excludes empties; reaches zero + clamps);
+  AnalyzeNowButton tests updated to the new wording. Server 157 passed / 4 SQL-skipped;
+  client 46 jest + tsc + lint; verified live on the running stack.
+
+_Earlier: 2026-09-08 (PR-review hardening)_
 
 ## Done — execution increment 21 (PR-review hardening: six review findings fixed)
 - **Real gold labels actually evaluated (eval):** `evaluate` now iterates the GOLD set (not just

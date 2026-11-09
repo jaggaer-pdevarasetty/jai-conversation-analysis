@@ -116,7 +116,7 @@ export default function OverviewPage() {
     return (
       <Stack spacing={3} role="status" aria-label="Loading overview">
         <Skeleton variant="rounded" height={112} />
-        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", xl: "repeat(3, 1fr)" }, gap: 2 }}>
+        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", xl: "repeat(4, 1fr)" }, gap: 2 }}>
           {[1, 2, 3, 4, 5, 6].map((item) => <Skeleton key={item} variant="rounded" height={136} />)}
         </Box>
         <Skeleton variant="rounded" height={380} />
@@ -135,6 +135,16 @@ export default function OverviewPage() {
 
   const analysed = data.total;
   const sourceConversations = overview?.conversations ?? analysed;
+  const analysisPopulation = overview?.analysis_population ?? sourceConversations;
+  const outsideAnalysisWindow = overview?.outside_analysis_window ?? 0;
+  const analysisWindowDays = overview?.analysis_window_days ?? null;
+  const analysableConversations = overview?.analysable ?? analysisPopulation;
+  const emptyTranscripts = overview?.empty_transcripts ?? 0;
+  const immediateAttention = overview?.immediate_attention ?? 0;
+  const guardrailBypasses = overview?.guardrail_bypasses ?? 0;
+  const kbIssues = overview?.kb_issues ?? 0;
+  const sourceCodeFlags = overview?.source_code_flags ?? 0;
+  const attentionReasons = overview?.attention_reasons ?? {};
   const positive = (data.counts.resolved ?? 0) + (data.counts.positive_feedback ?? 0);
   const attention =
     (data.counts.failed_to_resolve ?? 0) +
@@ -145,7 +155,9 @@ export default function OverviewPage() {
   ).length;
   const telemetryTotal = overview?.telemetry_total ?? data.items.length;
   const telemetryCoverage = telemetryTotal ? Math.round((coverageItems / telemetryTotal) * 100) : 0;
-  const analysisCoverage = sourceConversations ? Math.round((analysed / sourceConversations) * 100) : 0;
+  // Coverage against the ANALYSABLE population: empty-transcript conversations can never be
+  // analysed, so counting them in the denominator pins coverage below 100% forever.
+  const analysisCoverage = analysableConversations ? Math.min(100, Math.round((analysed / analysableConversations) * 100)) : 0;
   const lowConfidence = data.items.filter((item) => item.confidence === "low").length;
   const overrides = data.items.filter((item) => item.overridden).length;
 
@@ -190,6 +202,23 @@ export default function OverviewPage() {
         </Stack>
       </Box>
 
+      {immediateAttention > 0 && (
+        <Alert
+          severity="error"
+          action={<Button component={Link} href="/immediate-action" color="inherit" endIcon={<ArrowForwardRoundedIcon />}>Review</Button>}
+        >
+          <AlertTitle>{immediateAttention} {immediateAttention === 1 ? "conversation requires" : "conversations require"} immediate action</AlertTitle>
+          <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+            {guardrailBypasses > 0 && <Chip size="small" color="error" label={`${guardrailBypasses} guardrail ${guardrailBypasses === 1 ? "bypass" : "bypasses"}`} />}
+            {kbIssues > 0 && <Chip size="small" color="warning" label={`${kbIssues} KB ${kbIssues === 1 ? "issue" : "issues"}`} />}
+            {sourceCodeFlags > 0 && <Chip size="small" color="warning" label={`${sourceCodeFlags} source-code ${sourceCodeFlags === 1 ? "response" : "responses"}`} />}
+            {Object.entries(attentionReasons).filter(([reason]) => !["guardrail_bypass", "source_code"].includes(reason)).map(([reason, count]) => (
+              <Chip key={reason} size="small" variant="outlined" label={`${count} ${reason.replace(/_/g, " ")}`} />
+            ))}
+          </Stack>
+        </Alert>
+      )}
+
       {(() => {
         // Full unanalysed visibility (J1-93353 reliability NFR): the overview total covers BOTH
         // pending (never analysed) and failed (dead-lettered, retried next run) conversations.
@@ -200,9 +229,19 @@ export default function OverviewPage() {
           return (
             <Alert severity="warning">
               <AlertTitle>{waiting} {waiting === 1 ? "conversation is" : "conversations are"} waiting for analysis</AlertTitle>
-              {pending > 0 && `${pending.toLocaleString()} new ${pending === 1 ? "conversation has" : "conversations have"} not been analysed yet. `}
+              {pending > 0 && `${pending.toLocaleString()} analysable ${pending === 1 ? "conversation has" : "conversations have"} not been analysed yet. `}
               {failed > 0 && `${failed.toLocaleString()} failed ${failed === 1 ? "analysis is" : "analyses are"} retained and will be retried on the next analysis run.`}
               {pending === 0 && failed === 0 && "Conversations without an analysis remain visible here rather than silently excluded."}
+              {emptyTranscripts > 0 && (
+                <Typography variant="caption" sx={{ display: "block", mt: 0.5 }}>
+                  Excludes {emptyTranscripts.toLocaleString()} empty-transcript {emptyTranscripts === 1 ? "conversation" : "conversations"} — {emptyTranscripts === 1 ? "it has" : "they have"} no messages to analyse.
+                </Typography>
+              )}
+              {analysisWindowDays && outsideAnalysisWindow > 0 && (
+                <Typography variant="caption" sx={{ display: "block", mt: 0.5 }}>
+                  PROD analyzes only the last {analysisWindowDays} days; {outsideAnalysisWindow.toLocaleString()} older conversations are excluded.
+                </Typography>
+              )}
             </Alert>
           );
         }
@@ -210,19 +249,28 @@ export default function OverviewPage() {
           <Paper sx={{ p: 2, display: "flex", alignItems: "center", gap: 1.5, bgcolor: "#F0FAF6", borderColor: "#CFEBDD" }}>
             <CheckCircleOutlineRoundedIcon color="success" />
             <Box>
-              <Typography variant="body2" sx={{ fontWeight: 750 }}>Everything analysed — retry queue clear</Typography>
-              <Typography variant="caption" color="text.secondary">No pending or failed conversations are waiting for analysis.</Typography>
+              <Typography variant="body2" sx={{ fontWeight: 750 }}>Everything analysable is done — retry queue clear</Typography>
+              <Typography variant="caption" color="text.secondary">
+                No pending or failed conversations are waiting for analysis.
+                {emptyTranscripts > 0 && ` (${emptyTranscripts.toLocaleString()} empty-transcript ${emptyTranscripts === 1 ? "conversation is" : "conversations are"} excluded — no messages to analyse.)`}
+              </Typography>
+              {analysisWindowDays && outsideAnalysisWindow > 0 && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                  PROD analyzes only the last {analysisWindowDays} days; {outsideAnalysisWindow.toLocaleString()} older conversations are excluded.
+                </Typography>
+              )}
             </Box>
             {run && <Chip size="small" label={`Last run ${formatDate(run.completed_at)}`} sx={{ ml: "auto", display: { xs: "none", sm: "flex" }, bgcolor: "#FFFFFF" }} />}
           </Paper>
         );
       })()}
 
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", xl: "repeat(3, 1fr)" }, gap: 2 }}>
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", xl: "repeat(4, 1fr)" }, gap: 2 }}>
         <StatCard label="Tenants" value={(overview?.tenants ?? "—").toLocaleString()} helper="Organisations in the authorised directory" icon={<BusinessRoundedIcon />} />
         <StatCard label="Users" value={(overview?.users ?? "—").toLocaleString()} helper="Distinct users across tenants" icon={<GroupsOutlinedIcon />} tone="#356BB3" />
-        <StatCard label="Source conversations" value={sourceConversations.toLocaleString()} helper="Available read-only conversation records" icon={<ForumOutlinedIcon />} tone="#65758B" />
-        <StatCard label="Analysed" value={analysed.toLocaleString()} helper={`${analysisCoverage}% of source conversations`} icon={<FactCheckOutlinedIcon />} tone="#16815D" />
+        <StatCard label="Source conversations" value={sourceConversations.toLocaleString()} helper={analysisWindowDays ? `${analysisPopulation.toLocaleString()} in the ${analysisWindowDays}-day PROD analysis window` : "Available read-only conversation records"} icon={<ForumOutlinedIcon />} tone="#65758B" />
+        <StatCard label="Immediate action" value={immediateAttention.toLocaleString()} helper={`${guardrailBypasses} guardrail bypasses · ${kbIssues} KB issues`} icon={<ErrorOutlineRoundedIcon />} tone="#C43D4B" />
+        <StatCard label="Analysed" value={analysed.toLocaleString()} helper={`${analysisCoverage}% of analysable conversations`} icon={<FactCheckOutlinedIcon />} tone="#16815D" />
         <StatCard label="Needs attention" value={attention.toLocaleString()} helper="Failures, negative feedback, and capability gaps" icon={<ErrorOutlineRoundedIcon />} tone="#C43D4B" />
         <StatCard label="Telemetry complete" value={`${telemetryCoverage}%`} helper={`${coverageItems.toLocaleString()} of ${telemetryTotal.toLocaleString()} analysed conversations`} icon={<SpeedRoundedIcon />} tone="#7A55B8" />
       </Box>

@@ -13,6 +13,7 @@ const deep = {
 const detail: ConversationDetail = {
   conversation_id: "feedback-1",
   source: {
+    region: "us",
     tenant_id: "t1",
     tenant_name: "Example tenant",
     user_id: "u1",
@@ -46,6 +47,7 @@ const detail: ConversationDetail = {
 
 const feedback: FeedbackItem = {
   ...detail.source!,
+  feedback_id: "feedback-1:m2",
   conversation_id: "feedback-1",
   category: "negative_feedback",
   model_category: "negative_feedback",
@@ -67,6 +69,7 @@ describe("FeedbackConversationDetail", () => {
   it("shows the full conversation and highlights the exact rated response", () => {
     render(<FeedbackConversationDetail id="feedback-1" initialDetail={detail} initialFeedback={feedback} />);
     expect(screen.getByRole("heading", { name: "Compare supplier responses" })).toBeInTheDocument();
+    expect(screen.getAllByText("US").length).toBeGreaterThan(0);
     expect(screen.getByText("How do I compare responses?")).toBeInTheDocument();
     expect(screen.getByText("Rated response")).toBeInTheDocument();
     expect(screen.getAllByText("Not useful").some((node) => node.tagName === "STRONG")).toBe(true);

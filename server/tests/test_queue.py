@@ -91,6 +91,24 @@ def test_dead_letter_is_retried_by_the_next_run():
     assert q.enqueue([cid]) == [cid]
 
 
+def test_in_progress_and_dead_ids_expose_queue_state_per_env():
+    """The 'waiting for analysis' count must exclude work already queued/analysing (so a second
+    Analyze click mid-run doesn't re-list it) and surface dead-lettered ids as failed."""
+    store = CommonStore()
+    q = AnalysisQueue(store, _rules_batch, workers=0, max_attempts=1)
+    q.enqueue(IDS[:2], env="uit")
+    q.enqueue([IDS[2]], env="prod")
+    # queued/in-flight/retrying ids are reported per-env and don't leak across environments
+    assert q.in_progress_ids("uit") == set(IDS[:2])
+    assert q.in_progress_ids("prod") == {IDS[2]}
+    assert q.dead_ids("uit") == set()
+    # a failure dead-letters the id → out of in_progress, into dead
+    q._retry_or_dead([("uit", IDS[0])], region="us")
+    assert IDS[0] not in q.in_progress_ids("uit")
+    assert q.dead_ids("uit") == {IDS[0]}
+    assert q.dead_ids("prod") == set()
+
+
 def test_retry_dead_is_isolated_per_environment():
     store = CommonStore()
     q = AnalysisQueue(store, _rules_batch, workers=0, max_attempts=1)

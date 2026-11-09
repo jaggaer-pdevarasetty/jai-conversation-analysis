@@ -21,14 +21,13 @@ const EnvCtx = createContext<EnvState>({
 export const useEnv = () => useContext(EnvCtx);
 
 export function EnvProvider({ children }: { children: ReactNode }) {
-  // getEnv() is read synchronously from localStorage at module load, so it (and every request's
-  // ?env=) is already correct on first paint — this state is just for display.
-  const [env] = useState(getEnv());
+  const [env, setCurrentEnv] = useState("uit");
   const [environments, setEnvironments] = useState<string[]>(["uit"]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
+    setCurrentEnv(getEnv());
     fetchEnvironments()
       .then((d) => {
         if (!cancelled && d.items?.length) setEnvironments(d.items.map((i) => i.env));

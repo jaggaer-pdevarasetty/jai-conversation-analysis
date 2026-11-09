@@ -7,7 +7,7 @@ import { MarkdownContent } from "./MarkdownContent";
 
 const record: Detail = {
   conversation_id: "abc123",
-  source: { tenant_name: "Acme Corp", user_name: "jdoe", created_at: "2026-08-10T00:00:00Z", last_message_at: "2026-08-10T01:00:00Z" },
+  source: { region: "eu", tenant_name: "Acme Corp", user_name: "jdoe", created_at: "2026-08-10T00:00:00Z", last_message_at: "2026-08-10T01:00:00Z" },
   analysis: {
     category: "failed_to_resolve",
     model_category: "failed_to_resolve",
@@ -44,6 +44,7 @@ describe("ConversationDetail", () => {
     // Recommended action panel (mirrors the feedback view) holds the step + rationale.
     expect(screen.getByLabelText("Recommended action")).toBeInTheDocument();
     // Conversation context panel (tier-1) shows source metadata.
+    expect(screen.getByLabelText("Conversation context")).toHaveTextContent("EU");
     expect(screen.getByLabelText("Conversation context")).toHaveTextContent("Acme Corp");
     expect(screen.getByText("Improve the password-reset answer.")).toBeInTheDocument();
     expect(screen.getByText("High confidence")).toBeInTheDocument();
@@ -59,6 +60,31 @@ describe("ConversationDetail", () => {
     expect(screen.getByRole("table")).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Requisition Number" })).toBeInTheDocument();
     expect(screen.queryByText(/\*\*Settings\*\*/)).not.toBeInTheDocument();
+  });
+
+  it("shows a critical alert for a JAI-side guardrail bypass", () => {
+    const critical: Detail = {
+      ...record,
+      analysis: {
+        ...record.analysis,
+        signals: {
+          feedback: null,
+          repeated_prompts: false,
+          abandoned: false,
+          error: false,
+          out_of_scope_intent: false,
+          frustrated: true,
+          immediate_attention: true,
+          attention_reasons: ["high_frustration", "guardrail_bypass"],
+          kb_issue: false,
+          guardrail_bypass: true,
+          source_code: false,
+        },
+      },
+    };
+    render(<ConversationDetail id="abc123" initial={critical} />);
+    expect(screen.getByText("Critical: JAI guardrail bypass")).toBeInTheDocument();
+    expect(screen.getByText(/exposed internal implementation details/i)).toBeInTheDocument();
   });
 
   it("shows Total tokens as unavailable when one half is missing (never substitutes 0)", () => {

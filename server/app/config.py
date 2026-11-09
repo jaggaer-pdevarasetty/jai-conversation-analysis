@@ -73,6 +73,11 @@ class Settings:
     # Conversation source: "fixtures" (samples) | "chatdb" (REAL, canonical) | "langsmith".
     source: str = os.getenv("SOURCE", "fixtures")
 
+    # Extra exact CORS origins (comma-separated), e.g. "https://jai-review.internal".
+    # Loopback + private-LAN origins are always allowed (see the regex in main.py) so the
+    # reviewer UI works when opened via the host's LAN IP.
+    cors_allow_origins: str = os.getenv("CORS_ALLOW_ORIGINS", "")
+
     # Gemini via VERTEX AI only (enterprise). Vertex uses OAuth2 (service account / ADC via
     # GOOGLE_APPLICATION_CREDENTIALS) + project + location — NOT an API key. Classification
     # is enabled only when project + location are set; otherwise deterministic rules run.
@@ -90,6 +95,7 @@ class Settings:
     lazy_analyze: bool = os.getenv("LAZY_ANALYZE", "true").lower() == "true"
     # Scheduled sweep cadence in hours (enqueues eligible convos). 0 disables (AC-1: every 4h).
     schedule_hours: float = float(os.getenv("SCHEDULE_HOURS", "4"))
+    prod_analysis_lookback_days: int = int(os.getenv("PROD_ANALYSIS_LOOKBACK_DAYS", "7"))
     # Privacy mode: "admin" (show tenant/user — authorised internal view) or "pooled"
     # (AC-10/ADR-0007: no tenant/user identity; pseudonyms only; drill-down disabled).
     privacy_mode: str = os.getenv("PRIVACY_MODE", "admin")
@@ -103,6 +109,9 @@ class Settings:
 
     # RBAC gate for the reviewer API (off in dev/tests).
     rbac_enabled: bool = os.getenv("RBAC_ENABLED", "false").lower() == "true"
+
+    def analysis_lookback_days(self, env: str = "uit") -> int | None:
+        return self.prod_analysis_lookback_days if env == "prod" and self.prod_analysis_lookback_days > 0 else None
 
     @property
     def vertex_configured(self) -> bool:
@@ -121,11 +130,68 @@ class Settings:
             return single
         return f"{env}_{region.lower()}" if region else ""
 
-    def langsmith_api_key_for(self, env: str = "uit") -> str:
-        """LangSmith key for an environment (PROD_LANGSMITH_API_KEY for prod; else the default)."""
+    def langsmith_api_key_for(self, env: str = "uit", region: str | None = None) -> str:
+        """LangSmith key for an environment/region:
+        - UIT: LANGSMITH_API_KEY_UIT / LANGSMITH_API_KEY
+        - PROD US: LANGSMITH_API_KEY_PROD_US / PROD_LANGSMITH_API_KEY_US / PROD_REGION_US_LANGSMITH_API_KEY
+        - PROD EU/UK: LANGSMITH_API_KEY_PROD_EU_UK / PROD_LANGSMITH_API_KEY_EU_UK / PROD_REGION_{EU,UK}_LANGSMITH_API_KEY
+        """
         if env == "uit":
-            return self.langsmith_api_key
-        return os.getenv(f"{_env_prefix(env)}LANGSMITH_API_KEY", "") or self.langsmith_api_key
+            return (
+                os.getenv("LANGSMITH_API_KEY_UIT", "").strip()
+                or os.getenv("LANGSMITH_API_KEY", "").strip()
+                or self.langsmith_api_key
+            )
+        p = _env_prefix(env)
+        reg = (region or "").strip().lower()
+        if reg == "us":
+            for var in (
+                f"LANGSMITH_API_KEY_{p}US",
+                f"{p}LANGSMITH_API_KEY_US",
+                f"{p}REGION_US_LANGSMITH_API_KEY",
+            ):
+                if val := os.getenv(var, "").strip():
+                    return val
+        elif reg in {"eu", "uk"}:
+            for var in (
+                f"LANGSMITH_API_KEY_{p}EU_UK",
+                f"{p}LANGSMITH_API_KEY_EU_UK",
+                f"{p}REGION_{reg.upper()}_LANGSMITH_API_KEY",
+                f"{p}REGION_EU_LANGSMITH_API_KEY",
+                f"{p}REGION_UK_LANGSMITH_API_KEY",
+            ):
+                if val := os.getenv(var, "").strip():
+                    return val
+        elif reg:
+            if val := os.getenv(f"{p}REGION_{reg.upper()}_LANGSMITH_API_KEY", "").strip():
+                return val
+        for fallback_var in (
+            f"{p}LANGSMITH_API_KEY",
+            f"LANGSMITH_API_KEY_{p}US",
+            f"{p}LANGSMITH_API_KEY_US",
+            f"LANGSMITH_API_KEY_{p}EU_UK",
+            f"{p}LANGSMITH_API_KEY_EU_UK",
+        ):
+            if val := os.getenv(fallback_var, "").strip():
+                return val
+        return self.langsmith_api_key
+
+    def langsmith_workspace_id_for(self, region: str | None = None, env: str = "uit") -> str:
+        """LangSmith workspace (X-Tenant-Id) for a region/environment."""
+        p = _env_prefix(env)
+        if region:
+            override = os.getenv(f"{p}REGION_{region.upper()}_LANGSMITH_WORKSPACE_ID", "").strip()
+            if override:
+                return override
+        single = os.getenv(f"{p}LANGSMITH_WORKSPACE_ID", "").strip()
+        if single:
+            return single
+        if env == "prod":
+            if (region or "").lower() == "us":
+                return "ce8d887c-7501-4301-b9c3-3c1d55f6a37f"
+            if (region or "").lower() in {"eu", "uk"}:
+                return "051429df-8747-41d7-932d-888bf4efc930"
+        return ""
 
     def regions(self, env: str = "uit") -> "list[RegionConfig]":
         """Configured regional chat DBs for an environment (READ-ONLY).
@@ -136,20 +202,22 @@ class Settings:
         labelled by REGION_LABEL (default "uk"). 'prod' uses the PROD_ prefix.
         """
         p = _env_prefix(env)
+        default_db = f"jai_agentos_{env}" if env != DEFAULT_ENV else self.chat_db_name
+        default_schema = f"jai_agentos_schema_{env}" if env != DEFAULT_ENV else self.chat_db_schema
         labels = [x.strip() for x in os.getenv(f"{p}REGIONS", "").split(",") if x.strip()]
         if labels:
             out: list[RegionConfig] = []
             for label in labels:
                 u = label.upper()
-                url = os.getenv(f"{p}REGION_{u}_CHAT_DB_URL", "")
+                url = os.getenv(f"{p}REGION_{u}_CHAT_DB_URL", "").strip()
                 if not url:
                     continue
                 out.append(
                     RegionConfig(
                         label=label,
                         url=url,
-                        db_name=os.getenv(f"{p}REGION_{u}_CHAT_DB_NAME", self.chat_db_name),
-                        schema=os.getenv(f"{p}REGION_{u}_CHAT_DB_SCHEMA", self.chat_db_schema),
+                        db_name=os.getenv(f"{p}REGION_{u}_CHAT_DB_NAME", "").strip() or default_db,
+                        schema=os.getenv(f"{p}REGION_{u}_CHAT_DB_SCHEMA", "").strip() or default_schema,
                     )
                 )
             return out

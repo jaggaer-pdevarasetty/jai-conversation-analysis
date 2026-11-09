@@ -85,6 +85,9 @@ export default function TenantUsersPage() {
       <Box>
         <Typography variant="overline" color="primary.main">Tenant workspace</Typography>
         <Typography variant="h1" component="h1">{tenantName}</Typography>
+        <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+          {(tenant?.regions ?? []).map((value) => <Chip key={value} size="small" label={value.toUpperCase()} color="primary" variant="outlined" />)}
+        </Stack>
         <Typography color="text.secondary" sx={{ mt: 1 }}>Browse users and open their conversation histories. Tenant ID {tenantId}.</Typography>
       </Box>
 
@@ -138,8 +141,9 @@ export default function TenantUsersPage() {
               <Box sx={{ minWidth: 0 }}>
                 <Typography sx={{ fontWeight: 750, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.user_name}</Typography>
                 <Typography variant="caption" color="text.secondary">User ID {user.user_id}</Typography>
-                <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1 }}>
+                <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
                   <Chip size="small" label={user.role || "No role"} variant="outlined" />
+                  {user.regions.map((value) => <Chip key={value} size="small" label={value.toUpperCase()} color="primary" variant="outlined" />)}
                   <Typography variant="caption" color="text.secondary">{user.conversations} {user.conversations === 1 ? "conversation" : "conversations"}</Typography>
                 </Stack>
               </Box>

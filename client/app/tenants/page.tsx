@@ -147,6 +147,7 @@ export default function TenantsPage() {
                 <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
                   <Typography variant="h3" sx={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tenant.name}</Typography>
                   <EABadge ea={tenant.ea} />
+                  {tenant.regions.map((value) => <Chip key={value} size="small" label={value.toUpperCase()} color="primary" variant="outlined" />)}
                 </Box>
                 <Typography variant="caption" color="text.secondary">Tenant ID {tenant.tenant_id}</Typography>
                 <Stack direction="row" spacing={2.5} sx={{ mt: 1.5 }}>

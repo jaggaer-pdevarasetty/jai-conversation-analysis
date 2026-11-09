@@ -53,6 +53,11 @@ function tokenTotal(item: FeedbackItem): string {
   return (item.input_tokens + item.output_tokens).toLocaleString();
 }
 
+function feedbackHref(item: FeedbackItem): string {
+  const href = `/feedback/${item.conversation_id}`;
+  return item.feedback_message_id ? `${href}?message_id=${encodeURIComponent(item.feedback_message_id)}` : href;
+}
+
 export default function FeedbackPage() {
   const [data, setData] = useState<FeedbackListResponse | null>(null);
   const [search, setSearch] = useState("");
@@ -66,7 +71,7 @@ export default function FeedbackPage() {
   const [dateTo, setDateTo] = useState("");
   const [sort, setSort] = useState("newest");
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [rowsPerPage, setRowsPerPage] = useState(100);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const requestId = useRef(0);
@@ -199,7 +204,7 @@ export default function FeedbackPage() {
       )}
 
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", xl: "repeat(4, 1fr)" }, gap: 2 }}>
-        <StatCard label="Explicit ratings" value={scopeTotal.toLocaleString()} helper="Feedback conversations currently available" icon={<ChatBubbleOutlineRoundedIcon />} />
+        <StatCard label="Explicit ratings" value={scopeTotal.toLocaleString()} helper="Rated messages currently available" icon={<ChatBubbleOutlineRoundedIcon />} />
         <StatCard label="Negative feedback" value={negative.toLocaleString()} helper={`${negativeRate}% of explicit ratings`} icon={<ThumbDownAltRoundedIcon />} tone="#C43D4B" />
         <StatCard label="Positive feedback" value={positive.toLocaleString()} helper="Confirmed positive experiences" icon={<ThumbUpAltRoundedIcon />} tone="#16815D" />
         <StatCard label="Deep analysis coverage" value={`${deepCoverage}%`} helper="Records with root-cause guidance" icon={<InsightsRoundedIcon />} tone="#6B55B5" />
@@ -233,8 +238,8 @@ export default function FeedbackPage() {
         <TextField fullWidth size="small" type="date" label="From date" value={dateFrom} error={invalidDateRange} onChange={(event) => { setDateFrom(event.target.value); setDateRange(""); setPage(0); }} InputLabelProps={{ shrink: true }} />
         <TextField fullWidth size="small" type="date" label="To date" value={dateTo} error={invalidDateRange} helperText={invalidDateRange ? "To date must be on or after From date." : undefined} onChange={(event) => { setDateTo(event.target.value); setDateRange(""); setPage(0); }} InputLabelProps={{ shrink: true }} />
         <TextField fullWidth select size="small" label="Sort" value={sort} onChange={(event) => { setSort(event.target.value); setPage(0); }}>
-          <MenuItem value="newest">Newest conversation</MenuItem>
-          <MenuItem value="oldest">Oldest conversation</MenuItem>
+          <MenuItem value="newest">Newest feedback</MenuItem>
+          <MenuItem value="oldest">Oldest feedback</MenuItem>
           <MenuItem value="negative_first">Negative first</MenuItem>
         </TextField>
       </Paper>
@@ -244,16 +249,17 @@ export default function FeedbackPage() {
         <Box sx={{ px: 2.5, py: 2, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, borderBottom: "1px solid", borderColor: "divider" }}>
           <Box>
             <Typography variant="h3">Feedback records</Typography>
-            <Typography variant="body2" color="text.secondary">{data.total} matching {data.total === 1 ? "conversation" : "conversations"}</Typography>
+            <Typography variant="body2" color="text.secondary">{data.total} matching feedback {data.total === 1 ? "message" : "messages"}</Typography>
           </Box>
           {hasFilters && <Button size="small" onClick={clearFilters}>Clear filters</Button>}
         </Box>
-        <Table aria-label="Feedback conversations" sx={{ minWidth: 1220 }}>
+        <Table aria-label="Feedback messages" sx={{ minWidth: 1400 }}>
           <TableHead>
             <TableRow>
               <TableCell>Rating & user remark</TableCell>
               <TableCell>Conversation</TableCell>
               <TableCell>Tenant & user</TableCell>
+              <TableCell>Platform & mode</TableCell>
               <TableCell>Analysis</TableCell>
               <TableCell>Root cause</TableCell>
               <TableCell>Tokens</TableCell>
@@ -262,7 +268,7 @@ export default function FeedbackPage() {
           </TableHead>
           <TableBody>
             {visibleItems.length ? visibleItems.map((item) => (
-              <TableRow key={item.conversation_id} hover>
+              <TableRow key={item.feedback_id} hover>
                 <TableCell sx={{ width: 260 }}>
                   <Chip
                     size="small"
@@ -274,9 +280,17 @@ export default function FeedbackPage() {
                   <Box sx={{ mt: 1, fontWeight: 650, display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 3, overflow: "hidden" }}>
                     <MarkdownContent>{item.comment ? `“${item.comment}”` : "No written remark"}</MarkdownContent>
                   </Box>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.75 }}>
+                    {item.turn_number ? `Turn ${item.turn_number} · ` : ""}Rated message {item.feedback_message_id?.slice(0, 8) || "unavailable"} · {formatDate(item.feedback_at)}
+                  </Typography>
+                  {item.user_query && (
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.4, fontStyle: "italic" }} noWrap>
+                      Q: “{item.user_query}”
+                    </Typography>
+                  )}
                 </TableCell>
                 <TableCell sx={{ width: 260 }}>
-                  <MuiLink component={Link} href={`/feedback/${item.conversation_id}`} underline="hover" sx={{ color: "text.primary", fontWeight: 750, display: "block" }}>
+                  <MuiLink component={Link} href={feedbackHref(item)} underline="hover" sx={{ color: "text.primary", fontWeight: 750, display: "block" }}>
                     {item.title || `Conversation ${item.conversation_id.slice(0, 8)}`}
                   </MuiLink>
                   <Typography variant="caption" color="text.secondary" sx={{ display: "block", overflowWrap: "anywhere" }}>{item.conversation_id}</Typography>
@@ -288,8 +302,20 @@ export default function FeedbackPage() {
                   <Typography variant="caption" color="text.secondary" sx={{ display: "block", overflowWrap: "anywhere" }}>{item.user_name || "User unavailable"}</Typography>
                   {item.ea && <Box sx={{ mt: 0.75 }}><EABadge ea={item.ea} /></Box>}
                 </TableCell>
-                <TableCell sx={{ width: 180 }}>
+                <TableCell sx={{ width: 170 }}>
+                  <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                    <Chip size="small" label={item.region?.toUpperCase() || "Unknown region"} color="primary" variant="outlined" />
+                    <Chip size="small" label={item.platform || "Unknown platform"} variant="outlined" />
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.75 }}>
+                    {item.interaction_mode || "Mode unavailable"}{item.agent_used ? ` · ${item.agent_used}` : ""}
+                  </Typography>
+                </TableCell>
+                <TableCell sx={{ width: 190 }}>
                   <CategoryChip category={item.category} />
+                  {item.immediate_attention && <Chip size="small" color="error" label="Immediate attention" sx={{ display: "flex", width: "fit-content", mt: 0.6 }} />}
+                  {item.guardrail_bypass && <Typography variant="caption" sx={{ display: "block", mt: 0.5, color: "error.main", fontWeight: 800 }}>Guardrail bypass</Typography>}
+                  {item.kb_issue && <Typography variant="caption" sx={{ display: "block", mt: 0.5, color: "warning.dark", fontWeight: 700 }}>KB issue</Typography>}
                   <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.75 }}>{item.confidence ? `${item.confidence[0].toUpperCase()}${item.confidence.slice(1)} confidence` : "Confidence unavailable"}</Typography>
                 </TableCell>
                 <TableCell sx={{ minWidth: 280, maxWidth: 420 }}>
@@ -302,11 +328,11 @@ export default function FeedbackPage() {
                   <Typography variant="caption" color="text.secondary">input + output</Typography>
                 </TableCell>
                 <TableCell align="right">
-                  <Button component={Link} href={`/feedback/${item.conversation_id}`} size="small" endIcon={<ArrowForwardRoundedIcon />} aria-label={`Review feedback for ${item.conversation_id}`}>Review</Button>
+                  <Button component={Link} href={feedbackHref(item)} size="small" endIcon={<ArrowForwardRoundedIcon />} aria-label={`Review feedback ${item.feedback_id}`}>Review</Button>
                 </TableCell>
               </TableRow>
             )) : (
-              <TableRow><TableCell colSpan={7}><Box sx={{ py: 8, textAlign: "center" }}><ErrorOutlineRoundedIcon sx={{ fontSize: 38, color: "text.disabled" }} /><Typography variant="h3" sx={{ mt: 1 }}>{hasFilters ? "No feedback matches" : "No feedback available"}</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{hasFilters ? "Try a different sentiment, category, or search term." : "No explicit feedback has been recorded in this scope."}</Typography>{hasFilters && <Button sx={{ mt: 2 }} onClick={clearFilters}>Clear filters</Button>}</Box></TableCell></TableRow>
+              <TableRow><TableCell colSpan={8}><Box sx={{ py: 8, textAlign: "center" }}><ErrorOutlineRoundedIcon sx={{ fontSize: 38, color: "text.disabled" }} /><Typography variant="h3" sx={{ mt: 1 }}>{hasFilters ? "No feedback matches" : "No feedback available"}</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{hasFilters ? "Try a different sentiment, category, or search term." : "No explicit feedback has been recorded in this scope."}</Typography>{hasFilters && <Button sx={{ mt: 2 }} onClick={clearFilters}>Clear filters</Button>}</Box></TableCell></TableRow>
             )}
           </TableBody>
         </Table>
@@ -315,10 +341,10 @@ export default function FeedbackPage() {
           count={data.total}
           page={page}
           rowsPerPage={rowsPerPage}
-          rowsPerPageOptions={[5, 10, 25]}
+          rowsPerPageOptions={[10, 25, 50, 100, 150]}
           onPageChange={(_, nextPage) => setPage(nextPage)}
           onRowsPerPageChange={(event) => { setRowsPerPage(Number(event.target.value)); setPage(0); }}
-          labelRowsPerPage="Feedback per page"
+          labelRowsPerPage="Feedback messages per page"
         />
       </TableContainer>
     </Stack>

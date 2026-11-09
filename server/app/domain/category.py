@@ -14,6 +14,8 @@ def derive_category(signals: Signals) -> Category:
         return "negative_feedback"
     if signals.feedback == "positive":
         return "positive_feedback"
+    if signals.guardrail_bypass or signals.immediate_attention:
+        return "failed_to_resolve"
     if signals.out_of_scope_intent:
         return "out_of_scope"
     if signals.frustrated or signals.repeated_prompts or signals.abandoned or signals.error:

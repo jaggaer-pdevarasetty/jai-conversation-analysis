@@ -85,6 +85,11 @@ class Signals:
     error: bool
     out_of_scope_intent: bool
     frustrated: bool
+    immediate_attention: bool = False
+    attention_reasons: list[str] = field(default_factory=list)
+    kb_issue: bool = False
+    guardrail_bypass: bool = False
+    source_code: bool = False
 
 
 @dataclass
@@ -98,6 +103,8 @@ class Enrichment:
     intent: Optional[str] = None            # router intent, e.g. knowledge_search
     secondary_intent: Optional[str] = None
     agent_used: Optional[str] = None        # rag / ticket / ticket_status / ...
+    platform: Optional[str] = None
+    interaction_mode: Optional[str] = None
     response_type: Optional[str] = None     # answer / refusal / handoff
     source_confidence: Optional[str] = None  # the agent's own confidence (HIGH/MEDIUM/LOW)
     retrieval_hit: Optional[bool] = None    # did the knowledge base return any docs?
@@ -112,6 +119,8 @@ class Enrichment:
     turns: Optional[int] = None
     tenant_rules_applied: bool = False      # were tenant scope rules available for this convo?
     langsmith_found: bool = False           # did we actually match a LangSmith trace?
+    trace_id: str = ""                      # first root LangSmith trace id ("" when no trace)
+    trace_url: str = ""                     # LangSmith UI link to open the trace ("" when no trace)
 
 
 @dataclass

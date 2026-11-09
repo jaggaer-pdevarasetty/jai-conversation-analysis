@@ -20,6 +20,41 @@ def _conv(cid: str, region: str, tenant: str, replied: bool) -> Conversation:
     )
 
 
+def test_prod_eligibility_sql_applies_lookback(monkeypatch):
+    from app import chatdb
+
+    captured = {}
+
+    class Result:
+        def all(self):
+            return [("recent",)]
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def execute(self, statement, params=None):
+            captured["sql"] = str(statement)
+            captured["params"] = params or {}
+            return Result()
+
+    class Engine:
+        def connect(self):
+            return Connection()
+
+    monkeypatch.setattr(chatdb, "_platform_layout", lambda _connection, _schema: False)
+    region = config.RegionConfig("us", "postgresql://example", "chat", "public")
+
+    ids = chatdb._eligible_in_region(region, Engine(), None, lookback_days=15)
+
+    assert ids == ["recent"]
+    assert "last_message_at >= now() - (:lookback_days * interval '1 day')" in captured["sql"]
+    assert captured["params"]["lookback_days"] == 15
+
+
 def test_region_and_tenant_flow_into_record():
     rec = analyze(_conv("c1", "us", "42", replied=True), "run")
     assert rec.region == "us" and rec.tenant_id == "42"
@@ -106,6 +141,43 @@ def test_platform_threads_map_to_conversations():
     assert conversations[0].feedback.rating is None
 
 
+def test_tenant_and_user_rows_include_all_source_regions(monkeypatch):
+    from app import dashboard
+
+    tenant_row = {"tenant_id": "42", "name": "Acme", "conversations": 2, "users": 1}
+    monkeypatch.setattr(
+        dashboard,
+        "_map_regions",
+        lambda labels, worker: [("us", [tenant_row]), ("eu", [tenant_row])],
+    )
+    tenant = dashboard.tenants()[0]
+    assert tenant["regions"] == ["eu", "us"]
+    assert tenant["conversations"] == 4
+
+    user_row = {"user_id": "7", "user_name": "Reviewer", "role": "buyer", "conversations": 3}
+    monkeypatch.setattr(
+        dashboard,
+        "_map_regions",
+        lambda labels, worker: [("us", [user_row]), ("uk", [user_row])],
+    )
+    user = dashboard.users("42")[0]
+    assert user["regions"] == ["uk", "us"]
+    assert user["conversations"] == 6
+
+    conversation_row = {
+        "id": "c1", "title": "Help", "message_count": 2,
+        "last_message_at": "2026-10-01T10:00:00+00:00",
+    }
+    monkeypatch.setattr(
+        dashboard,
+        "_map_regions",
+        lambda labels, worker: [("eu", 1, [conversation_row])],
+    )
+    conversations, total = dashboard.user_conversations(CommonStore(), "42", "7")
+    assert total == 1
+    assert conversations[0]["region"] == "eu"
+
+
 def test_dashboard_telemetry_uses_all_records(monkeypatch):
     from app import dashboard
 
@@ -124,10 +196,12 @@ def test_dashboard_telemetry_uses_all_records(monkeypatch):
     assert result["telemetry_total"] == 2
 
 
-def test_dashboard_timestamps_are_iso_formatted():
-    from app.dashboard import _timestamp
+def test_chatdb_timestamps_are_iso_utc():
+    from datetime import datetime
 
-    assert _timestamp("2026-08-13 18:52:59") == "2026-08-13T18:52:59"
+    from app.chatdb import utc_timestamp
+
+    assert utc_timestamp(datetime(2026, 8, 13, 18, 52, 59)) == "2026-08-13T18:52:59+00:00"
 
 
 def test_dashboard_reuses_region_engine(monkeypatch):

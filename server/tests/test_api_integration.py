@@ -87,6 +87,55 @@ def test_list_paginates_and_searches_on_the_server():
     assert searched["items"][0]["conversation_id"] == conversation_id
 
 
+def test_list_filters_immediate_attention(monkeypatch):
+    from dataclasses import replace
+
+    records = main_module.store.list()
+    target = records[0]
+    flagged = replace(
+        target,
+        signals=replace(
+            target.signals,
+            immediate_attention=True,
+            attention_reasons=["guardrail_bypass"],
+            guardrail_bypass=True,
+        ),
+    )
+    monkeypatch.setattr(
+        main_module.store,
+        "list",
+        lambda category=None, region=None, env="uit": [flagged, *records[1:]],
+    )
+
+    body = client.get(
+        "/api/analysis/conversations", params={"review_state": "immediate_attention"}
+    ).json()
+
+    assert body["total"] == 1
+    assert body["items"][0]["conversation_id"] == target.conversation_id
+    assert body["items"][0]["guardrail_bypass"] is True
+
+    by_reason = client.get(
+        "/api/analysis/conversations",
+        params={"review_state": "immediate_attention", "attention_reason": "guardrail_bypass"},
+    ).json()
+    assert by_reason["total"] == 1
+    assert by_reason["items"][0]["attention_reasons"] == ["guardrail_bypass"]
+
+    with_analytics = client.get(
+        "/api/analysis/conversations",
+        params={
+            "review_state": "immediate_attention",
+            "include_analytics": "true",
+            "limit": 150,
+        },
+    ).json()
+    assert with_analytics["limit"] == 150
+    assert with_analytics["items"][0]["tenant_id"] is not None
+    assert with_analytics["analytics"]["guardrail_bypass"] == 1
+    assert with_analytics["analytics"]["serious_by_day"][0]["guardrail_bypass"] == 1
+
+
 def test_list_filters_missing_telemetry():
     body = client.get(
         "/api/analysis/conversations", params={"review_state": "missing_telemetry"}
@@ -113,6 +162,36 @@ def test_detail_has_analysis_messages_feedback_and_metrics():
     assert body["analysis"]["category"] == "positive_feedback"
     assert body["messages"] and body["messages"][0]["sequence_num"] == 1
     assert set(body["metrics"]) == {"ttft_ms", "input_tokens", "output_tokens", "prompt_tokens"}
+
+
+def test_detail_live_fetches_missing_enrichment(monkeypatch):
+    from dataclasses import replace
+
+    from app.domain.models import Enrichment
+
+    record = main_module.store.get_analysis(POSITIVE_ID)
+    assert record is not None
+    monkeypatch.setattr(
+        main_module.store,
+        "get_analysis",
+        lambda conversation_id, env="uit": replace(record, enrichment=None, region="us"),
+    )
+    calls = []
+    writes = []
+    monkeypatch.setattr(
+        "app.enrichment.fetch_enrichment",
+        lambda conversation_id, region, env="uit", with_prompt=False: calls.append(
+            (conversation_id, region, env, with_prompt)
+        ) or Enrichment(intent="knowledge_search", langsmith_found=True),
+    )
+    monkeypatch.setattr(main_module.store, "upsert", lambda updated, conversation: writes.append((updated, conversation)))
+
+    body = client.get(f"/api/analysis/conversations/{POSITIVE_ID}").json()
+
+    assert body["enrichment"]["langsmith_found"] is True
+    assert body["enrichment"]["intent"] == "knowledge_search"
+    assert calls == [(POSITIVE_ID, "us", "uit", True)]
+    assert writes and writes[0][0].enrichment is not None
 
 
 def test_detail_carries_per_message_telemetry():
