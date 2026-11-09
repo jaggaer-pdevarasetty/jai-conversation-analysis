@@ -7,20 +7,29 @@ from datetime import datetime, timezone
 from ..pii import pseudonymize
 from .category import derive_category, recommended_next_step
 from .models import AnalysisRecord, Conversation, Metrics, Signals
-from .signals import detect_abandoned, detect_error, detect_repeated_prompts, feedback_signal
+from .signals import detect_abandoned, detect_assistant_attention, detect_error, detect_repeated_prompts, feedback_signal
 
 ANALYZER_VERSION = "0.2.0"
 
 
 def compute_signals(conv: Conversation) -> Signals:
     user_messages = [m.content for m in conv.messages if m.role == "user"]
+    attention = detect_assistant_attention(conv.messages, conv.enrichment)
     return Signals(
         feedback=feedback_signal(conv.feedback),
         repeated_prompts=detect_repeated_prompts(user_messages),
         abandoned=detect_abandoned(conv.messages),
-        error=detect_error(conv.messages),
+        error=detect_error(conv.messages) or any(
+            reason in {"rate_limit", "service_failure", "processing_failure", "stream_failure", "authentication_failure", "ticket_failure", "technical_error_leak"}
+            for reason in attention.reasons
+        ),
         out_of_scope_intent=conv.out_of_scope_intent,
-        frustrated=conv.frustrated,
+        frustrated=conv.frustrated or attention.high_frustration,
+        immediate_attention=bool(attention.reasons),
+        attention_reasons=list(attention.reasons),
+        kb_issue=attention.kb_issue,
+        guardrail_bypass=attention.guardrail_bypass,
+        source_code=attention.source_code,
     )
 
 
@@ -58,6 +67,10 @@ def _readable_rationale(signals: Signals) -> str:
         reasons.append("the request was outside JAI's scope")
     if signals.frustrated:
         reasons.append("the user appeared frustrated")
+    if signals.immediate_attention:
+        reasons.append("the assistant response requires immediate attention: " + ", ".join(signals.attention_reasons).replace("_", " "))
+    if signals.kb_issue:
+        reasons.append("the assistant could not find or provide an answer from the knowledge base")
     if not reasons:
         return "No problem signals were detected, so the chat is treated as resolved."
     return "Assigned because " + ", ".join(reasons) + "."

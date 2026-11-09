@@ -8,6 +8,7 @@ import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import MenuRoundedIcon from "@mui/icons-material/MenuRounded";
 import ThumbsUpDownOutlinedIcon from "@mui/icons-material/ThumbsUpDownOutlined";
 import TroubleshootRoundedIcon from "@mui/icons-material/TroubleshootRounded";
+import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
 import {
   AppBar,
   Box,
@@ -43,6 +44,7 @@ export function idSearchHref(input: string): string | null {
 
 const NAV = [
   { href: "/", label: "Overview", icon: <DashboardRoundedIcon /> },
+  { href: "/immediate-action", label: "Immediate Action", icon: <WarningAmberRoundedIcon /> },
   { href: "/tenants", label: "Tenants", icon: <BusinessRoundedIcon /> },
   { href: "/feedback", label: "Feedback", icon: <ThumbsUpDownOutlinedIcon /> },
   { href: "/insights", label: "Insights", icon: <TroubleshootRoundedIcon /> },
@@ -90,6 +92,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const isActive = (href: string) => (href === "/" ? overviewView : pathname.startsWith(href));
   const pageTitle = overviewView
     ? "Overview"
+    : pathname.startsWith("/immediate-action")
+      ? "Immediate Action"
     : pathname.startsWith("/insights")
       ? "Insights"
       : pathname.startsWith("/feedback/")

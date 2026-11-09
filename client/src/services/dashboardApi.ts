@@ -6,12 +6,20 @@ export interface Overview {
   tenants: number;
   users: number;
   conversations: number; // all non-deleted source records
+  analysis_population?: number;
+  outside_analysis_window?: number;
+  analysis_window_days?: number | null;
   analysable?: number; // has a transcript → can ever be analysed (backlog denominator)
   empty_transcripts?: number; // no messages → permanently excluded from analysis/backlog
   analysed: number;
   unanalysed: number; // true total: pending (analysable, never analysed) + failed (dead-lettered)
   unanalysed_pending?: number;
   unanalysed_failed?: number;
+  immediate_attention?: number;
+  guardrail_bypasses?: number;
+  kb_issues?: number;
+  source_code_flags?: number;
+  attention_reasons?: Record<string, number>;
   counts: Record<string, number>;
   telemetry_complete: number;
   telemetry_total: number;
@@ -35,6 +43,7 @@ export interface Tenant {
   name: string;
   conversations: number;
   users: number;
+  regions: string[];
   ea?: EAInfo | null; // Early Access customer badge (mirrors Confluence roster)
 }
 export interface TenantUser {
@@ -42,9 +51,11 @@ export interface TenantUser {
   user_name: string;
   role: string | null;
   conversations: number;
+  regions: string[];
 }
 export interface UserConversation {
   conversation_id: string;
+  region: string | null;
   title: string | null;
   message_count: number | null;
   last_message_at: string | null;

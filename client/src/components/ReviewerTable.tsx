@@ -193,6 +193,8 @@ export function ReviewerTable() {
         <TextField fullWidth select size="small" label="Review state" value={reviewState} onChange={(event) => { setReviewState(event.target.value); setPage(0); }}>
           <MenuItem value="">All conversations</MenuItem>
           <MenuItem value="attention">Needs attention</MenuItem>
+          <MenuItem value="immediate_attention">Immediate attention</MenuItem>
+          <MenuItem value="kb_issue">KB issues</MenuItem>
           <MenuItem value="feedback">Has feedback</MenuItem>
           <MenuItem value="overridden">Human override</MenuItem>
           <MenuItem value="missing_telemetry">Missing telemetry</MenuItem>
@@ -244,11 +246,15 @@ export function ReviewerTable() {
                     <MuiLink component={Link} href={`/conversations/${item.conversation_id}`} underline="hover" sx={{ display: "block", color: "text.primary", fontWeight: 750, fontSize: 13, overflowWrap: "anywhere" }}>
                       {item.conversation_id}
                     </MuiLink>
+                    {item.region && <Chip size="small" label={item.region.toUpperCase()} variant="outlined" sx={{ mt: 0.6, mb: 0.35 }} />}
                     <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>Last message {formatDate(item.last_message_at ?? item.analyzed_at)}</Typography>
                     <Typography variant="caption" color="text.secondary">Analysed {formatDate(item.analyzed_at)}</Typography>
                   </TableCell>
-                  <TableCell sx={{ width: 175 }}>
+                  <TableCell sx={{ width: 190 }}>
                     <CategoryChip category={item.category} />
+                    {item.immediate_attention && <Chip size="small" color="error" label="Immediate attention" sx={{ display: "flex", width: "fit-content", mt: 0.6 }} />}
+                    {item.guardrail_bypass && <Typography variant="caption" sx={{ display: "block", mt: 0.5, color: "error.main", fontWeight: 800 }}>Guardrail bypass</Typography>}
+                    {item.kb_issue && <Typography variant="caption" sx={{ display: "block", mt: 0.5, color: "warning.dark", fontWeight: 700 }}>KB issue</Typography>}
                     {item.overridden && <Typography variant="caption" sx={{ display: "block", mt: 0.6, color: "warning.dark", fontWeight: 700 }}>Human override</Typography>}
                   </TableCell>
                   <TableCell sx={{ minWidth: 250, maxWidth: 390 }}>

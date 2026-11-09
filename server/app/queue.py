@@ -84,6 +84,19 @@ class AnalysisQueue:
             self._store.mark_analyzing(accepted, env)
         return accepted
 
+    def in_progress_ids(self, env: str) -> set[str]:
+        """conversation_ids currently queued / in-flight / retrying for an env (the dedup set).
+        Used so the 'waiting for analysis' count doesn't re-show work already being processed —
+        re-clicking Analyze mid-run would otherwise list the same conversations again."""
+        with self._lock:
+            return {cid for (e, cid) in self._queued if e == env}
+
+    def dead_ids(self, env: str) -> set[str]:
+        """conversation_ids dead-lettered (failed max_attempts) for an env — surfaced as 'failed';
+        released + retried by the next sweep's retry_dead()."""
+        with self._lock:
+            return {cid for (e, cid) in self._dead if e == env}
+
     def retry_dead(self, env: str) -> int:
         """Release this environment's dead-lettered items so the NEXT run can retry them
         (J1-93353 reliability: 'failed analysis are queued and retried in the next run').

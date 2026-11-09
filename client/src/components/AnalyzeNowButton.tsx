@@ -3,6 +3,7 @@
 import PlayArrowRoundedIcon from "@mui/icons-material/PlayArrowRounded";
 import {
   Alert,
+  AlertTitle,
   Box,
   Button,
   Chip,
@@ -50,20 +51,103 @@ function PendingPreview({ data, showRegions }: { data: PendingResponse; showRegi
       {data.items.length > 0 && (
         <Box sx={{ maxHeight: 180, overflow: "auto", bgcolor: "action.hover", borderRadius: 1.5 }}>
           <List dense disablePadding>
-            {data.items.map((it) => (
-              <ListItem key={it.conversation_id} divider>
+            {data.items.map((it) => {
+              const neg = it.negative_count ?? 0;
+              const pos = it.positive_count ?? 0;
+              const fbBadge =
+                neg > 0 || pos > 0
+                  ? [neg > 0 ? `${neg} 👎` : null, pos > 0 ? `${pos} 👍` : null].filter(Boolean).join(" · ")
+                  : null;
+              return (
+                <ListItem key={it.conversation_id} divider>
+                  <ListItemText
+                    primaryTypographyProps={{ noWrap: true, fontWeight: 600 }}
+                    secondaryTypographyProps={{ noWrap: true }}
+                    primary={it.title || it.tenant_name || it.conversation_id.slice(0, 8)}
+                    secondary={[it.region?.toUpperCase(), it.tenant_name, fbBadge, ago(it.last_message_at)].filter(Boolean).join(" · ")}
+                  />
+                </ListItem>
+              );
+            })}
+          </List>
+        </Box>
+      )}
+      {data.items.length < data.count && (
+        <Typography variant="caption" color="text.secondary">
+          Showing newest {data.items.length} of {data.count} conversations.
+        </Typography>
+      )}
+    </Stack>
+  );
+}
+
+function NegativeFeedbackSummary({ data }: { data: PendingResponse }) {
+  const count = data.negative_feedback_messages ?? 0;
+  const positiveMessages = data.positive_feedback_messages ?? 0;
+  const totalMessages = data.feedback_messages ?? count + positiveMessages;
+  const positiveConversations = data.positive_feedback_conversations ?? 0;
+  const negativeConversations = data.negative_feedback_conversations ?? 0;
+  const items = data.negative_items ?? [];
+  return (
+    <Box sx={{ p: 1.5, mb: 2, border: "1px solid", borderColor: "divider", borderRadius: 2 }}>
+      <Typography variant="subtitle2">Negative feedback messages</Typography>
+      <Typography variant="body2" sx={{ mt: 0.5 }}>
+        <b>{count}</b> negative rated message{count === 1 ? "" : "s"} waiting for analysis
+        {totalMessages > 0
+          ? ` (${positiveMessages} positive message${positiveMessages === 1 ? "" : "s"} across ${data.count} feedback conversation${data.count === 1 ? "" : "s"}).`
+          : "."}
+      </Typography>
+      <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+        <Chip size="small" color="secondary" variant="outlined" label={`Feedback convos ${data.count}`} />
+        <Chip size="small" color="error" variant="outlined" label={`Negative convos ${negativeConversations}`} />
+        <Chip size="small" color="success" variant="outlined" label={`Positive-only convos ${positiveConversations}`} />
+        <Chip size="small" color="error" variant="outlined" label={`Negative messages ${count}`} />
+        <Chip size="small" color="success" variant="outlined" label={`Positive messages ${positiveMessages}`} />
+        {Object.entries(data.negative_by_region ?? {}).map(([name, total]) => (
+          <Chip key={`region-${name}`} size="small" label={`${name.toUpperCase()}: ${total}`} variant="outlined" />
+        ))}
+        {Object.entries(data.negative_by_mode ?? {}).map(([name, total]) => (
+          <Chip key={`mode-${name}`} size="small" label={`${name}: ${total}`} variant="outlined" />
+        ))}
+        {data.average_frustration !== null && data.average_frustration !== undefined && (
+          <Chip size="small" color="warning" variant="outlined" label={`Avg frustration ${data.average_frustration.toFixed(2)}`} />
+        )}
+      </Stack>
+      {items.length > 0 && (
+        <Box sx={{ maxHeight: 240, overflow: "auto", bgcolor: "action.hover", borderRadius: 1.5, mt: 1 }}>
+          <List dense disablePadding>
+            {items.map((item, idx) => (
+              <ListItem key={item.feedback_id} divider>
                 <ListItemText
                   primaryTypographyProps={{ noWrap: true, fontWeight: 600 }}
                   secondaryTypographyProps={{ noWrap: true }}
-                  primary={it.title || it.tenant_name || it.conversation_id.slice(0, 8)}
-                  secondary={[it.region?.toUpperCase(), it.tenant_name, ago(it.last_message_at)].filter(Boolean).join(" · ")}
+                  primary={[
+                    `Msg #${idx + 1}`,
+                    item.turn_number ? `Turn ${item.turn_number}` : null,
+                    item.feedback_message_id ? `id ${item.feedback_message_id.slice(0, 8)}` : null,
+                    item.title || item.tenant_name || item.conversation_id.slice(0, 8),
+                  ].filter(Boolean).join(" · ")}
+                  secondary={[
+                    item.region?.toUpperCase(),
+                    item.tenant_name,
+                    item.platform,
+                    item.interaction_mode,
+                    item.frustration_score === null ? "frustration unavailable" : `frustration ${item.frustration_score.toFixed(2)}`,
+                    item.user_query ? `Q: "${item.user_query}"` : null,
+                    item.comment,
+                  ].filter(Boolean).join(" · ")}
                 />
               </ListItem>
             ))}
           </List>
         </Box>
       )}
-    </Stack>
+      {data.details_complete === false && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+          Mode and frustration lookups are limited to the newest 20 pending conversations; remaining messages are counted as Unknown.
+        </Typography>
+      )}
+    </Box>
   );
 }
 
@@ -145,6 +229,20 @@ export function AnalyzeNowButton({
             </Stack>
           )}
 
+          {phase === "ready" && (feedback.deep_research_negative ?? 0) > 0 && (
+            <Alert severity="warning" sx={{ mb: 2 }}>
+              <AlertTitle>Deep Research negative feedback</AlertTitle>
+              {feedback.deep_research_negative} negative feedback message{feedback.deep_research_negative === 1 ? "" : "s"} came from Deep Research. Review these first.
+            </Alert>
+          )}
+          {phase === "ready" && isProd && all.analysis_window_days && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              <AlertTitle>PROD analysis window</AlertTitle>
+              Bulk analysis includes only conversations active in the last {all.analysis_window_days} days. Older history is excluded.
+            </Alert>
+          )}
+          {phase === "ready" && <NegativeFeedbackSummary data={feedback} />}
+
           {phase === "ready" && !isProd && (
             all.count > 0 ? (
               <Stack spacing={1.5}>
@@ -152,32 +250,53 @@ export function AnalyzeNowButton({
                   <b>{all.count}</b> conversation{all.count === 1 ? " is" : "s are"} waiting for analysis in {scopeLabel}
                   {" "}(not yet analysed, of any age).
                 </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Recent chats appear after 5 minutes without a new message.
+                </Typography>
                 {/* Feedback pending is by construction a subset of all pending (feedback_only just
                     narrows the same eligible set), so Without-feedback = all - feedback >= 0;
                     max(0,…) is a defensive guard. The extra feedback fetch runs in parallel
                     (Promise.all) with the all fetch, so it adds no latency — it's what powers
                     this breakdown. */}
                 <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                  <Chip size="small" color="primary" label={`Total ${all.count}`} />
-                  <Chip size="small" color="secondary" variant="outlined" label={`With feedback ${feedback.count}`} />
+                  <Chip size="small" color="primary" label={`Total conversations ${all.count}`} />
+                  <Chip size="small" color="secondary" variant="outlined" label={`Feedback conversations ${feedback.count}`} />
+                  <Chip size="small" color="error" variant="outlined" label={`Negative messages ${feedback.negative_feedback_messages ?? 0}`} />
+                  <Chip size="small" color="success" variant="outlined" label={`Positive messages ${feedback.positive_feedback_messages ?? 0}`} />
                   <Chip size="small" variant="outlined" label={`Without feedback ${Math.max(0, all.count - feedback.count)}`} />
                 </Stack>
+                {((all.in_progress ?? 0) > 0 || (all.failed ?? 0) > 0) && (
+                  <Typography variant="caption" color="text.secondary">
+                    {(all.in_progress ?? 0) > 0 && `${all.in_progress} already queued/analysing (excluded from the count above). `}
+                    {(all.failed ?? 0) > 0 && `${all.failed} previously failed — will be retried when you start.`}
+                  </Typography>
+                )}
                 <PendingPreview data={all} showRegions={!region} />
               </Stack>
+            ) : (all.in_progress ?? 0) > 0 ? (
+              <Typography>All conversations in {scopeLabel} are already queued or being analysed ({all.in_progress}). Watch the live analysis queue for progress — no new sweep needed.</Typography>
             ) : (
-              <Typography>Everything eligible is already analysed in {scopeLabel} — nothing is waiting for analysis.</Typography>
+              <Typography>Everything currently eligible is already analysed in {scopeLabel}. Recent chats appear after 5 minutes without a new message.</Typography>
             )
           )}
 
           {phase === "ready" && isProd && (
             <Stack spacing={2} divider={<Divider flexItem />}>
               <Stack spacing={1}>
-                <Typography variant="subtitle2">Feedback conversations</Typography>
+                <Typography variant="subtitle2">Feedback conversations (positive + negative)</Typography>
                 {feedback.count > 0 ? (
                   <>
                     <Typography variant="body2">
-                      <b>{feedback.count}</b> conversation{feedback.count === 1 ? "" : "s"} with user feedback are not analyzed yet.
+                      <b>{feedback.count}</b> conversation{feedback.count === 1 ? "" : "s"} with user feedback are not analyzed yet
+                      {" "}({feedback.negative_feedback_conversations ?? 0} with negative feedback, {feedback.positive_feedback_conversations ?? 0} positive-only).
                     </Typography>
+                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                      <Chip size="small" color="primary" label={`Total conversations ${all.count}`} />
+                      <Chip size="small" color="secondary" variant="outlined" label={`Feedback conversations ${feedback.count}`} />
+                      <Chip size="small" color="error" variant="outlined" label={`Negative messages ${feedback.negative_feedback_messages ?? 0}`} />
+                      <Chip size="small" color="success" variant="outlined" label={`Positive messages ${feedback.positive_feedback_messages ?? 0}`} />
+                      <Chip size="small" variant="outlined" label={`Without feedback ${Math.max(0, all.count - feedback.count)}`} />
+                    </Stack>
                     <PendingPreview data={feedback} showRegions={!region} />
                     <Box>
                       <Button variant="contained" size="small" startIcon={<PlayArrowRoundedIcon />} onClick={() => start("feedback", feedback.count)}>
@@ -191,14 +310,18 @@ export function AnalyzeNowButton({
               </Stack>
 
               <Stack spacing={1}>
-                <Typography variant="subtitle2">All conversations</Typography>
+                <Typography variant="subtitle2">
+                  All conversations{all.analysis_window_days ? ` (last ${all.analysis_window_days} days)` : ""}
+                </Typography>
                 {all.count > 0 ? (
                   <>
                     <Typography variant="body2">
-                      <b>{all.count}</b> conversation{all.count === 1 ? "" : "s"} are not analyzed yet (feedback + normal).
+                      <b>{all.count}</b> conversation{all.count === 1 ? "" : "s"}
+                      {all.analysis_window_days ? ` in the last ${all.analysis_window_days} days` : ""} are not analyzed yet (feedback + normal).
                     </Typography>
                     <Alert severity="warning" sx={{ py: 0 }}>
-                      This analyzes <b>every</b> conversation in {scopeLabel}, including the feedback ones above.
+                      This analyzes <b>every</b> conversation in {scopeLabel}
+                      {all.analysis_window_days ? ` from the last ${all.analysis_window_days} days` : ""}, including the feedback ones above.
                     </Alert>
                     <PendingPreview data={all} showRegions={!region} />
                     <Box>

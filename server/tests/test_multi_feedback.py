@@ -5,7 +5,7 @@ from dataclasses import asdict
 
 from fastapi.testclient import TestClient
 
-from app import gemini
+from app import gemini, main as main_module
 from app.deidentify import deidentify
 from app.domain.analyze import analyze as rules_analyze
 from app.domain.models import CommonConversation, Conversation, Enrichment, Feedback, Message
@@ -64,6 +64,55 @@ def test_store_backcompat_row_without_feedbacks_key():
     assert len(out.feedbacks) == 1 and out.feedbacks[0].rating is False
 
 
+def test_feedback_endpoint_returns_one_row_per_rated_message(monkeypatch):
+    source = _conv(
+        id="multi-rated",
+        feedback=Feedback(rating=False, comment="first", message_id="m1"),
+        feedbacks=[
+            Feedback(rating=False, comment="first", message_id="m1"),
+            Feedback(rating=False, comment="second", message_id="m2"),
+            Feedback(rating=True, comment="fixed", message_id="m3"),
+        ],
+        messages=[
+            Message(id="m1", role="assistant", content="a", sequence_num=1, created_at="2026-10-01T10:00:00+00:00"),
+            Message(id="m2", role="assistant", content="b", sequence_num=2, created_at="2026-10-01T10:01:00+00:00"),
+            Message(id="m3", role="assistant", content="c", sequence_num=3, created_at="2026-10-01T10:02:00+00:00"),
+        ],
+    )
+    record = rules_analyze(source, "run")
+    record.enrichment = Enrichment(
+        agent_used="rag", platform="JI", interaction_mode="Ask", langsmith_found=True
+    )
+    common = deidentify(source)
+    calls = []
+    monkeypatch.setattr(
+        main_module.store,
+        "list",
+        lambda region=None, env="uit": calls.append(("list", env)) or [record],
+    )
+    monkeypatch.setattr(
+        main_module.store,
+        "get_conversations",
+        lambda ids, env="uit": calls.append(("conversations", env)) or {source.id: common},
+    )
+    monkeypatch.setattr(
+        "app.dashboard.conversation_meta",
+        lambda ids, region=None, env="uit": calls.append(("meta", env)) or {source.id: {"title": "Three ratings"}},
+    )
+
+    body = client.get("/api/analysis/feedback?env=prod&limit=100").json()
+
+    assert body["total"] == 3
+    assert body["scope_total"] == 3
+    assert body["negative"] == 2
+    assert body["positive"] == 1
+    assert {item["feedback_message_id"] for item in body["items"]} == {"m1", "m2", "m3"}
+    assert len({item["feedback_id"] for item in body["items"]}) == 3
+    assert {item["platform"] for item in body["items"]} == {"JI"}
+    assert {item["interaction_mode"] for item in body["items"]} == {"Ask"}
+    assert calls == [("list", "prod"), ("conversations", "prod"), ("meta", "prod")]
+
+
 # ── Part B: root cause + user_hash + grouping ───────────────────────────────
 def test_deep_analyze_sets_root_cause_and_feeds_all_feedback():
     conv = _conv(
@@ -100,6 +149,17 @@ def test_user_hash_is_pseudonymised_never_raw():
     rec = rules_analyze(_conv(user_id="user-9999"), "run")
     assert rec.user_hash.startswith("user-")
     assert "9999" not in rec.user_hash  # one-way hash, not the raw id
+
+
+def test_attention_signals_route_to_insights_groups():
+    guardrail = rules_analyze(_conv(), "run")
+    guardrail.signals.guardrail_bypass = True
+    guardrail.signals.immediate_attention = True
+    assert main_module._record_root_cause(guardrail) == "guardrail_bypass"
+
+    kb = rules_analyze(_conv(), "run")
+    kb.signals.kb_issue = True
+    assert main_module._record_root_cause(kb) == "knowledge_gap"
 
 
 def test_groups_endpoint_is_impact_ranked():

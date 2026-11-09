@@ -2,11 +2,13 @@
 
 import ExpandMoreRoundedIcon from "@mui/icons-material/ExpandMoreRounded";
 import InsightsOutlinedIcon from "@mui/icons-material/InsightsOutlined";
+import OpenInNewRoundedIcon from "@mui/icons-material/OpenInNewRounded";
 import {
   Accordion,
   AccordionDetails,
   AccordionSummary,
   Box,
+  Button,
   Chip,
   Divider,
   Paper,
@@ -18,14 +20,41 @@ import type { Enrichment } from "../services/analysisApi";
 /** Shows the safe, PII-scrubbed LangSmith trace signals (ADR-0018/0021): what the live JAI
  * agent did + "what it was thinking" (its own reasoning) + which documents it used. For feedback
  * conversations it also shows the retrieved snippets and the actual (scrubbed) invocation prompt.
- * Renders nothing when no LangSmith trace was matched (e.g. outside the 15-day window). */
+ * Renders an explicit reason when trace details were not captured or no trace was matched. */
 export function EnrichmentPanel({ enrichment }: { enrichment?: Enrichment | null }) {
   const e = enrichment;
-  if (!e || !e.langsmith_found) return null;
+  const title = (
+    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+      <InsightsOutlinedIcon color="primary" />
+      <Typography variant="h3">What the assistant did (LangSmith)</Typography>
+    </Box>
+  );
+
+  if (!e || !e.langsmith_found) {
+    const noMatch = Boolean(e);
+    return (
+      <Paper aria-label="LangSmith trace" sx={{ p: 2.5 }}>
+        {title}
+        <Typography variant="body2" sx={{ mt: 1.5, fontWeight: 700 }}>
+          {noMatch ? "No matching LangSmith trace was found." : "LangSmith trace details were not captured when this analysis ran."}
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
+          {noMatch
+            ? "Why: the configured project and environment returned no root runs for this conversation. The trace may be outside retention or stored in another project or environment."
+            : "Why: this record contains no enrichment status, so the exact lookup failure was not retained. The best-effort lookup may have been unavailable or returned no match."}
+        </Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+          Retrieved documents, snippets, reasoning, and invocation prompt details cannot be shown without matched trace data.
+        </Typography>
+      </Paper>
+    );
+  }
 
   const chips: string[] = [
     e.intent && `intent: ${e.intent}`,
     e.agent_used && `agent: ${e.agent_used}`,
+    e.platform && `platform: ${e.platform}`,
+    e.interaction_mode && `mode: ${e.interaction_mode}`,
     e.response_type && `response: ${e.response_type}`,
     e.source_confidence && `agent confidence: ${e.source_confidence}`,
     e.retrieval_hit === true && `knowledge base: ${e.retrieved_count} doc(s) found`,
@@ -38,10 +67,7 @@ export function EnrichmentPanel({ enrichment }: { enrichment?: Enrichment | null
 
   return (
     <Paper aria-label="LangSmith trace" sx={{ p: 2.5 }}>
-      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-        <InsightsOutlinedIcon color="primary" />
-        <Typography variant="h3">What the assistant did (LangSmith)</Typography>
-      </Box>
+      {title}
 
       <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1.5 }}>
         {chips.length ? (
@@ -50,6 +76,27 @@ export function EnrichmentPanel({ enrichment }: { enrichment?: Enrichment | null
           <Typography variant="body2" color="text.secondary">No trace signals.</Typography>
         )}
       </Stack>
+
+      {(e.trace_url || e.trace_id) && (
+        <>
+          <Divider sx={{ my: 2 }} />
+          <Typography variant="caption" color="text.secondary">LangSmith trace</Typography>
+          <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap" sx={{ mt: 0.5 }}>
+            <Typography variant="body2" sx={{ fontFamily: "monospace", overflowWrap: "anywhere" }}>{e.trace_id}</Typography>
+            {e.trace_url && (
+              <Button
+                size="small"
+                href={e.trace_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                endIcon={<OpenInNewRoundedIcon />}
+              >
+                Open trace
+              </Button>
+            )}
+          </Stack>
+        </>
+      )}
 
       {e.reasoning_summary && (
         <>

@@ -100,10 +100,12 @@ function Metric({ label, value, icon }: { label: string; value: string; icon: Re
 
 export function FeedbackConversationDetail({
   id,
+  selectedFeedbackMessageId,
   initialDetail,
   initialFeedback,
 }: {
   id: string;
+  selectedFeedbackMessageId?: string;
   initialDetail?: ConversationDetail;
   initialFeedback?: FeedbackItem;
 }) {
@@ -118,7 +120,7 @@ export function FeedbackConversationDetail({
     setDetail(null);
     setFeedbackItem(null);
     setError(null);
-    Promise.all([fetchFeedbackConversation(id), fetchFeedbackItem(id)])
+    Promise.all([fetchFeedbackConversation(id), fetchFeedbackItem(id, selectedFeedbackMessageId)])
       .then(([conversation, feedback]) => {
         if (!active) return;
         setDetail(conversation);
@@ -126,7 +128,7 @@ export function FeedbackConversationDetail({
       })
       .catch(() => { if (active) setError("This feedback conversation could not be loaded from the current API response."); });
     return () => { active = false; };
-  }, [id, initialDetail, initialFeedback, reload]);
+  }, [id, selectedFeedbackMessageId, initialDetail, initialFeedback, reload]);
 
   if (error) return <Alert severity="error" action={<Button color="inherit" onClick={() => setReload((value) => value + 1)}>Try again</Button>}><AlertTitle>Feedback detail unavailable</AlertTitle>{error}</Alert>;
   if (!detail || !feedbackItem) return <Stack spacing={2.5} role="status" aria-label="Loading feedback conversation"><Skeleton variant="rounded" height={130} /><Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "1.5fr .75fr" }, gap: 2.5 }}><Skeleton variant="rounded" height={650} /><Skeleton variant="rounded" height={520} /></Box></Stack>;
@@ -159,10 +161,24 @@ export function FeedbackConversationDetail({
         <Button component={Link} href={`/conversations/${id}`} endIcon={<ArrowForwardRoundedIcon />} sx={{ ml: "auto" }}>Standard analysis</Button>
       </Box>
 
+      {detail.analysis.signals?.guardrail_bypass && (
+        <Alert severity="error">
+          <AlertTitle>Critical: JAI guardrail bypass</AlertTitle>
+          The assistant exposed internal implementation details after a guardrail rejection.
+        </Alert>
+      )}
+      {detail.analysis.signals?.immediate_attention && !detail.analysis.signals.guardrail_bypass && (
+        <Alert severity="warning">
+          <AlertTitle>Immediate attention required</AlertTitle>
+          {(detail.analysis.signals.attention_reasons ?? []).map((reason) => reason.replace(/_/g, " ")).join(", ")}.
+        </Alert>
+      )}
+
       <Paper sx={{ p: { xs: 2.25, md: 3 }, borderTop: "4px solid", borderTopColor: accent, bgcolor: tint }}>
         <Box sx={{ display: "flex", alignItems: { xs: "flex-start", md: "center" }, justifyContent: "space-between", gap: 2, flexDirection: { xs: "column", md: "row" } }}>
           <Box sx={{ minWidth: 0 }}>
             <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+              {source?.region && <Chip size="small" label={source.region.toUpperCase()} color="primary" variant="outlined" />}
               <Chip
                 icon={positive ? <ThumbUpAltRoundedIcon /> : <ThumbDownAltRoundedIcon />}
                 label={positive ? "Positive feedback" : "Negative feedback"}
@@ -261,6 +277,7 @@ export function FeedbackConversationDetail({
           <Paper sx={{ p: 2.5 }}>
             <Typography variant="h3">Conversation context</Typography>
             <Stack spacing={1.15} sx={{ mt: 2 }}>
+              <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">Region</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right" }}>{source?.region?.toUpperCase() || "Unavailable"}</Typography></Box>
               <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">Tenant</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right" }}>{source?.tenant_name || "Unavailable"}</Typography></Box>
               <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">User</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right", overflowWrap: "anywhere" }}>{source?.user_name || "Unavailable"}</Typography></Box>
               <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">Created</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right" }}>{formatDate(source?.created_at)}</Typography></Box>

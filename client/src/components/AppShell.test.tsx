@@ -32,6 +32,7 @@ describe("AppShell", () => {
   it("routes to Overview, Tenants, and the pooled review queue", () => {
     render(<AppShell><div>Overview content</div></AppShell>);
     expect(screen.getByRole("link", { name: "Overview" })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "Immediate Action" })).toHaveAttribute("href", "/immediate-action");
     expect(screen.getByRole("link", { name: "Tenants" })).toHaveAttribute("href", "/tenants");
     expect(screen.getByRole("link", { name: "Review queue" })).toHaveAttribute("href", "/conversations");
     expect(screen.getByText("Operational overview")).toBeInTheDocument();

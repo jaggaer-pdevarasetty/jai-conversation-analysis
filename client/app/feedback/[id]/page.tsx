@@ -1,9 +1,10 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { FeedbackConversationDetail } from "../../../src/components/FeedbackConversationDetail";
 
 export default function FeedbackConversationPage() {
   const params = useParams();
-  return <FeedbackConversationDetail id={String(params.id)} />;
+  const messageId = useSearchParams().get("message_id") ?? undefined;
+  return <FeedbackConversationDetail id={String(params.id)} selectedFeedbackMessageId={messageId} />;
 }

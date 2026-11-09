@@ -228,6 +228,8 @@ def _record(conv: Conversation, run_id: str, now: str, p: dict | None) -> Analys
         enforced = "negative_feedback"
     elif has_up and not has_down:
         enforced = "positive_feedback"
+    elif signals.immediate_attention:
+        enforced = "failed_to_resolve"
     recalibrated = enforced is not None and category != enforced
     if recalibrated:
         category = enforced
@@ -241,12 +243,15 @@ def _record(conv: Conversation, run_id: str, now: str, p: dict | None) -> Analys
     step = (p.get("recommended_next_step") or "").strip()
     if recalibrated or not step:
         step = recommended_next_step(category)  # type: ignore[arg-type]
+    rationale = (p.get("rationale") or "").strip()
+    if signals.immediate_attention:
+        rationale = "Immediate attention: " + ", ".join(signals.attention_reasons).replace("_", " ") + "."
     return AnalysisRecord(
         conversation_id=conv.id,
         model_category=category,  # type: ignore[arg-type]
         recommended_next_step=step,
         confidence=confidence,  # type: ignore[arg-type]
-        rationale=(p.get("rationale") or "").strip(),
+        rationale=rationale,
         signals=signals,
         metrics=compute_metrics(conv),
         status="analysed",

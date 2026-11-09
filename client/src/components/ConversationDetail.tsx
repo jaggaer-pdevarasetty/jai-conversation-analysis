@@ -146,6 +146,7 @@ export function ConversationDetail({ id, initial }: { id: string; initial?: Deta
 
   const a = detail.analysis;
   const m = detail.metrics;
+  const sourceRegion = detail.source?.region ?? a.region;
   const signals = a.signals;
   const activeSignals = signals ? [
     signals.repeated_prompts && "Repeated prompts",
@@ -154,6 +155,8 @@ export function ConversationDetail({ id, initial }: { id: string; initial?: Deta
     signals.out_of_scope_intent && "Out-of-scope intent",
     signals.frustrated && "Frustration detected",
     signals.feedback && `${signals.feedback[0].toUpperCase()}${signals.feedback.slice(1)} feedback signal`,
+    ...(signals.attention_reasons ?? []).map((reason) => `Attention: ${reason.replace(/_/g, " ")}`),
+    signals.kb_issue && "Knowledge-base issue",
   ].filter(Boolean) as string[] : [];
   const feedbackIcon = detail.feedback.rating === true
     ? <ThumbUpAltOutlinedIcon color="success" />
@@ -165,6 +168,18 @@ export function ConversationDetail({ id, initial }: { id: string; initial?: Deta
     <Stack spacing={2.5}>
       {error && <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>}
       {saved && <Alert severity="success" onClose={() => setSaved(false)}>Category override saved and added to the audit record.</Alert>}
+      {signals?.guardrail_bypass && (
+        <Alert severity="error">
+          <AlertTitle>Critical: JAI guardrail bypass</AlertTitle>
+          The assistant exposed internal implementation details after a guardrail rejection. Review the response and retrieved documents immediately.
+        </Alert>
+      )}
+      {signals?.immediate_attention && !signals.guardrail_bypass && (
+        <Alert severity="warning">
+          <AlertTitle>Immediate attention required</AlertTitle>
+          {(signals.attention_reasons ?? []).map((reason) => reason.replace(/_/g, " ")).join(", ")}.
+        </Alert>
+      )}
 
       <Paper sx={{ p: { xs: 2.25, md: 3 } }}>
         <Box sx={{ display: "flex", flexDirection: { xs: "column", md: "row" }, alignItems: { xs: "flex-start", md: "center" }, justifyContent: "space-between", gap: 2 }}>
@@ -174,6 +189,7 @@ export function ConversationDetail({ id, initial }: { id: string; initial?: Deta
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.7 }}>Analysed {formatDate(a.analyzed_at)}</Typography>
           </Box>
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            {sourceRegion && <Chip size="small" label={sourceRegion.toUpperCase()} color="primary" variant="outlined" />}
             <CategoryChip category={a.category} />
             <Chip size="small" label={`${a.confidence[0]?.toUpperCase()}${a.confidence.slice(1)} confidence`} variant="outlined" color={a.confidence === "high" ? "success" : a.confidence === "low" ? "warning" : "default"} />
             <Chip size="small" label={a.status === "analysed" ? "Analysis complete" : a.status} icon={<CheckCircleRoundedIcon />} sx={{ bgcolor: "#F2F4F7" }} />
@@ -204,6 +220,13 @@ export function ConversationDetail({ id, initial }: { id: string; initial?: Deta
                       <Typography variant="body2" sx={{ fontWeight: 750 }}>{roleLabel(message.role)}</Typography>
                       {message.created_at && <Typography variant="caption" color="text.secondary">{formatDate(message.created_at)}</Typography>}
                       {message.model && <Typography variant="caption" color="text.secondary">· {message.model}</Typography>}
+                      {message.id && <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }}>· msg {message.id}</Typography>}
+                      {message.status && message.status !== "completed" && (
+                        <Chip size="small" color="error" label={`Status: ${message.status}`} title={message.error_message || undefined} />
+                      )}
+                      {message.status === "completed" && message.error_message && (
+                        <Chip size="small" color="error" variant="outlined" label="Message error" title={message.error_message} />
+                      )}
                     </Box>
                     <Box sx={{ mt: 0.75, px: 2, py: 1.5, borderRadius: 2.5, bgcolor: assistant ? "#FFFFFF" : "#F7F8FA", border: "1px solid", borderColor: "divider" }}>
                       <MarkdownContent>{message.content || "No message content"}</MarkdownContent>
@@ -243,6 +266,7 @@ export function ConversationDetail({ id, initial }: { id: string; initial?: Deta
               <Typography variant="h3">Conversation context</Typography>
               {detail.source.ea && <Box sx={{ mt: 1.25 }}><EABadge ea={detail.source.ea} /></Box>}
               <Stack spacing={1.15} sx={{ mt: 2 }}>
+                <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">Region</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right" }}>{sourceRegion?.toUpperCase() || "Unavailable"}</Typography></Box>
                 <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">Tenant</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right" }}>{detail.source.tenant_name || "Unavailable"}</Typography></Box>
                 <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">User</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right", overflowWrap: "anywhere" }}>{detail.source.user_name || "Unavailable"}</Typography></Box>
                 <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography variant="body2" color="text.secondary">Created</Typography><Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right" }}>{formatDate(detail.source.created_at ?? undefined)}</Typography></Box>

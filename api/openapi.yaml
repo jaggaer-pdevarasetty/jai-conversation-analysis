@@ -50,7 +50,8 @@ paths:
         - { name: category, in: query, required: false, schema: { $ref: '#/components/schemas/Category' } }
         - { name: query, in: query, required: false, schema: { type: string }, description: Search conversation ID or recommended next step. }
         - { name: confidence, in: query, required: false, schema: { $ref: '#/components/schemas/Confidence' } }
-        - { name: review_state, in: query, required: false, schema: { type: string, enum: [attention, feedback, overridden, missing_telemetry] } }
+        - { name: review_state, in: query, required: false, schema: { type: string, enum: [attention, immediate_attention, kb_issue, feedback, overridden, missing_telemetry] } }
+        - { name: attention_reason, in: query, required: false, schema: { type: string, maxLength: 50 }, description: Exact immediate-attention reason filter. }
         - { name: sort, in: query, required: false, schema: { type: string, enum: [newest, oldest, attention, confidence, slowest, tokens], default: newest } }
         - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
         - { name: offset, in: query, required: false, schema: { type: integer, minimum: 0, default: 0 } }
@@ -185,8 +186,9 @@ paths:
       summary: Manual flow step 1 — fetch (do not analyse) new/unanalysed conversations
       description: >-
         Returns the count of eligible, not-yet-analysed conversations for the selected region
-        (or all regions), a per-region breakdown, and brief details for a sample. Does not start
-        analysis. Chat-DB source only; other sources return count 0.
+        (or all regions), a per-region breakdown, and brief details for a sample. Feedback scope
+        also reports negative rated messages by region/mode/platform with frustration. Does not
+        start analysis. Chat-DB source only; other sources return count 0.
       parameters:
         - { name: region, in: query, required: false, schema: { type: string }, description: Region label (e.g. us/eu/uk); omit for all regions }
         - { name: env, in: query, required: false, schema: { type: string, enum: [uit, prod] }, description: Environment (default uit) }
@@ -292,7 +294,18 @@ components:
         prompt_tokens: { type: [integer, 'null'] }
     Signals:
       type: object
-      additionalProperties: true
+      properties:
+        feedback: { type: [string, 'null'], enum: [positive, negative, null] }
+        repeated_prompts: { type: boolean }
+        abandoned: { type: boolean }
+        error: { type: boolean }
+        out_of_scope_intent: { type: boolean }
+        frustrated: { type: boolean }
+        immediate_attention: { type: boolean }
+        attention_reasons: { type: array, items: { type: string } }
+        kb_issue: { type: boolean }
+        guardrail_bypass: { type: boolean }
+        source_code: { type: boolean }
     Override:
       type: object
       properties:
@@ -308,6 +321,7 @@ components:
       required: [conversation_id, category, status]
       properties:
         conversation_id: { type: string }
+        region: { type: [string, 'null'] }
         category: { $ref: '#/components/schemas/Category' }
         model_category: { $ref: '#/components/schemas/Category' }
         recommended_next_step: { type: string }
@@ -315,6 +329,11 @@ components:
         status: { $ref: '#/components/schemas/Status' }
         overridden: { type: boolean }
         has_feedback: { type: boolean }
+        immediate_attention: { type: boolean }
+        attention_reasons: { type: array, items: { type: string } }
+        kb_issue: { type: boolean }
+        guardrail_bypass: { type: boolean }
+        source_code: { type: boolean }
         metrics: { $ref: '#/components/schemas/Metrics' }
         last_message_at: { type: [string, 'null'], format: date-time }
         analyzed_at: { type: string, format: date-time }
@@ -330,14 +349,26 @@ components:
         offset: { type: integer }
     FeedbackItem:
       type: object
-      required: [conversation_id, category, confidence, rating]
+      required: [feedback_id, conversation_id, category, confidence, rating]
       properties:
+        feedback_id: { type: string }
+        feedback_message_id: { type: [string, 'null'] }
+        feedback_at: { type: [string, 'null'], format: date-time }
         conversation_id: { type: string }
+        region: { type: [string, 'null'] }
+        platform: { type: [string, 'null'] }
+        interaction_mode: { type: [string, 'null'] }
+        agent_used: { type: [string, 'null'] }
         category: { $ref: '#/components/schemas/Category' }
         model_category: { $ref: '#/components/schemas/Category' }
         confidence: { $ref: '#/components/schemas/Confidence' }
         rating: { type: [boolean, 'null'] }
         comment: { type: [string, 'null'] }
+        immediate_attention: { type: boolean }
+        attention_reasons: { type: array, items: { type: string } }
+        kb_issue: { type: boolean }
+        guardrail_bypass: { type: boolean }
+        source_code: { type: boolean }
         recommended_next_step: { type: string }
         rationale: { type: string }
         why_it_happened: { type: string }
@@ -381,6 +412,7 @@ components:
         analysis:
           type: object
           properties:
+            region: { type: [string, 'null'] }
             category: { $ref: '#/components/schemas/Category' }
             model_category: { $ref: '#/components/schemas/Category' }
             recommended_next_step: { type: string }
@@ -443,6 +475,8 @@ components:
         intent: { type: [string, 'null'] }
         secondary_intent: { type: [string, 'null'] }
         agent_used: { type: [string, 'null'] }
+        platform: { type: [string, 'null'] }
+        interaction_mode: { type: [string, 'null'] }
         response_type: { type: [string, 'null'] }
         source_confidence: { type: [string, 'null'] }
         retrieval_hit: { type: [boolean, 'null'] }
@@ -486,12 +520,20 @@ components:
         tenants: { type: integer }
         users: { type: integer }
         conversations: { type: integer, description: All non-deleted source conversations. }
-        analysable: { type: integer, description: Source conversations that have a transcript — the population that can ever be analysed. }
-        empty_transcripts: { type: integer, description: Source conversations with no messages — permanently excluded from analysis and from the backlog. }
+        analysis_population: { type: integer, description: Source conversations inside the environment analysis window. }
+        outside_analysis_window: { type: integer, description: Older source conversations excluded from bulk analysis. }
+        analysis_window_days: { type: [integer, 'null'], description: PROD bulk-analysis lookback; null means all history. }
+        analysable: { type: integer, description: In-window source conversations that have a transcript. }
+        empty_transcripts: { type: integer, description: In-window source conversations with no messages. }
         analysed: { type: integer }
         unanalysed: { type: integer, description: True in-scope total (pending + failed), over the analysable population. }
-        unanalysed_pending: { type: integer, description: Analysable conversations not yet analysed (any age; includes fresh ones awaiting the 5-minute inactivity window). Region-scoped when a region is selected. }
+        unanalysed_pending: { type: integer, description: In-window analysable conversations not yet analysed (includes fresh ones awaiting the 5-minute inactivity window). Region-scoped when a region is selected. }
         unanalysed_failed: { type: integer, description: Attempted, dead-lettered — retried on the next run. Region-scoped when a region is selected (unknown-region failures count only in the all-regions total). }
+        immediate_attention: { type: integer }
+        guardrail_bypasses: { type: integer }
+        kb_issues: { type: integer }
+        source_code_flags: { type: integer }
+        attention_reasons: { type: object, additionalProperties: { type: integer } }
         counts: { type: object, additionalProperties: { type: integer } }
         telemetry_complete: { type: integer }
         telemetry_total: { type: integer }
@@ -507,6 +549,7 @@ components:
               name: { type: string }
               conversations: { type: integer }
               users: { type: integer }
+              regions: { type: array, items: { type: string } }
               ea:
                 anyOf: [{ type: object, description: Early Access customer badge (label/product/status/privacy). }, { type: 'null' }]
         region: { type: [string, 'null'] }
@@ -523,6 +566,7 @@ components:
               user_name: { type: string }
               role: { type: [string, 'null'] }
               conversations: { type: integer }
+              regions: { type: array, items: { type: string } }
         region: { type: [string, 'null'] }
         environment: { type: string }
     UserConversationsResponse:
@@ -534,6 +578,7 @@ components:
             type: object
             properties:
               conversation_id: { type: string }
+              region: { type: [string, 'null'] }
               title: { type: [string, 'null'] }
               message_count: { type: [integer, 'null'] }
               last_message_at: { type: [string, 'null'], format: date-time }
@@ -573,6 +618,32 @@ components:
               tenant_name: { type: [string, 'null'] }
               title: { type: [string, 'null'] }
               last_message_at: { type: [string, 'null'] }
+        negative_feedback_messages: { type: integer }
+        negative_by_region: { type: object, additionalProperties: { type: integer } }
+        negative_by_mode: { type: object, additionalProperties: { type: integer } }
+        negative_by_platform: { type: object, additionalProperties: { type: integer } }
+        deep_research_negative: { type: integer }
+        average_frustration: { type: [number, 'null'] }
+        frustration_scored_messages: { type: integer }
+        details_complete: { type: boolean }
+        negative_items:
+          type: array
+          items:
+            type: object
+            properties:
+              feedback_id: { type: string }
+              conversation_id: { type: string }
+              feedback_message_id: { type: [string, 'null'] }
+              comment: { type: [string, 'null'] }
+              feedback_at: { type: [string, 'null'], format: date-time }
+              region: { type: [string, 'null'] }
+              tenant_name: { type: [string, 'null'] }
+              title: { type: [string, 'null'] }
+              platform: { type: string }
+              interaction_mode: { type: string }
+              agent_used: { type: [string, 'null'] }
+              frustration_score: { type: [number, 'null'] }
+        analysis_window_days: { type: [integer, 'null'], description: PROD bulk-analysis lookback; null means all history. }
         region: { type: [string, 'null'] }
         source: { type: string }
     SweepStatus:

@@ -20,9 +20,10 @@ const tenants: Tenant[] = [
     name: "ENEL S.p.A.",
     conversations: 100,
     users: 10,
+    regions: ["eu", "us"],
     ea: { key: "enel", label: "ENEL", product: "JI", status: "active", privacy: "RoPA / ISO 42001", privacy_sensitive: true },
   },
-  { tenant_id: "2", name: "Acme Corp", conversations: 50, users: 5, ea: null },
+  { tenant_id: "2", name: "Acme Corp", conversations: 50, users: 5, regions: ["uk"], ea: null },
 ];
 
 describe("TenantsPage — Early Access", () => {
@@ -35,6 +36,9 @@ describe("TenantsPage — Early Access", () => {
     render(<TenantsPage />);
     expect(await screen.findByText("ENEL S.p.A.")).toBeInTheDocument();
     expect(screen.getByText("Acme Corp")).toBeInTheDocument();
+    expect(screen.getByText("EU")).toBeInTheDocument();
+    expect(screen.getByText("US")).toBeInTheDocument();
+    expect(screen.getByText("UK")).toBeInTheDocument();
 
     // EA badge + privacy flag on the ENEL card
     expect(screen.getByText("Early Access · JI")).toBeInTheDocument();

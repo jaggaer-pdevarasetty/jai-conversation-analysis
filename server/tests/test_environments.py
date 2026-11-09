@@ -22,6 +22,37 @@ def test_langsmith_project_defaults_per_env():
     assert settings.langsmith_project_for("us", "prod") == "prod_us"
 
 
+def test_separate_langsmith_keys_for_uit_prod_us_and_prod_eu_uk(monkeypatch):
+    monkeypatch.setenv("LANGSMITH_API_KEY_UIT", "uit-key")
+    monkeypatch.setenv("PROD_LANGSMITH_API_KEY_US", "prod-us-key")
+    monkeypatch.setenv("PROD_LANGSMITH_API_KEY_EU_UK", "prod-eu-uk-key")
+    monkeypatch.setenv("PROD_LANGSMITH_API_KEY", "")
+
+    assert settings.langsmith_api_key_for("uit", "us") == "uit-key"
+    assert settings.langsmith_api_key_for("uit", "eu") == "uit-key"
+    assert settings.langsmith_api_key_for("prod", "us") == "prod-us-key"
+    assert settings.langsmith_api_key_for("prod", "eu") == "prod-eu-uk-key"
+    assert settings.langsmith_api_key_for("prod", "uk") == "prod-eu-uk-key"
+    assert settings.langsmith_api_key_for("prod") == "prod-us-key"
+
+
+def test_prod_bulk_analysis_defaults_to_seven_days():
+    assert settings.analysis_lookback_days("uit") is None
+    assert settings.analysis_lookback_days("prod") == 7
+
+
+def test_prod_blank_db_name_and_schema_fall_back_to_prod_defaults(monkeypatch):
+    monkeypatch.setenv("PROD_REGIONS", "us")
+    monkeypatch.setenv("PROD_REGION_US_CHAT_DB_URL", "postgresql+psycopg://u:p@prod-host:5432/jai_agentos_prod")
+    monkeypatch.setenv("PROD_REGION_US_CHAT_DB_NAME", "")
+    monkeypatch.setenv("PROD_REGION_US_CHAT_DB_SCHEMA", "")
+
+    region = settings.regions("prod")[0]
+
+    assert region.db_name == "jai_agentos_prod"
+    assert region.schema == "jai_agentos_schema_prod"
+
+
 def test_store_isolates_environments():
     store = CommonStore()
     conv = CONVERSATIONS[0]

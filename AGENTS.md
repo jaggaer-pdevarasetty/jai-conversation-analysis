@@ -38,8 +38,16 @@ npm run dev                            # http://localhost:3000
 cd server && python3.13 -m venv .venv && . .venv/bin/activate
 pip install -r requirements-dev.txt
 python -m pytest                       # unit + integration (< 1s)
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --reload --port 8000            # localhost only (127.0.0.1)
+uvicorn app.main:app --host 0.0.0.0 --port 8000      # ALSO reachable on the LAN IP
 ```
+
+### Sharing the UI on the LAN (e.g. http://10.19.8.252:3000)
+Default `uvicorn` binds **127.0.0.1**, so a LAN-served UI gets `ERR_CONNECTION_REFUSED` on :8000 —
+start the API with `--host 0.0.0.0` (and the UI with `npm run dev -- -H 0.0.0.0` if needed).
+CORS already allows loopback + private-LAN (RFC1918) origins; add public ones via
+`CORS_ALLOW_ORIGINS`. The client's `API_BASE` defaults to the **host the UI is served from**
+(port 8000) — override with `NEXT_PUBLIC_API_BASE` / `NEXT_PUBLIC_API_PORT`.
 
 ## The Loop (every task)
 EXPLORE → PLAN (3 options + trade-offs → `docs/decisions/`) → EXECUTE (one module) →

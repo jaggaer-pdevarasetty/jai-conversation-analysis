@@ -15,10 +15,23 @@ export interface Signals {
   error: boolean;
   out_of_scope_intent: boolean;
   frustrated: boolean;
+  immediate_attention: boolean;
+  attention_reasons: string[];
+  kb_issue: boolean;
+  guardrail_bypass: boolean;
+  source_code: boolean;
 }
 
 export interface ListItem {
   conversation_id: string;
+  region?: string | null;
+  tenant_id?: string | null;
+  tenant_name?: string | null;
+  ea?: EAInfo | null;
+  title?: string | null;
+  platform?: string | null;
+  interaction_mode?: string | null;
+  agent_used?: string | null;
   category: string;
   model_category?: string;
   recommended_next_step: string;
@@ -26,9 +39,52 @@ export interface ListItem {
   status: string;
   overridden: boolean;
   has_feedback: boolean;
+  immediate_attention: boolean;
+  attention_reasons: string[];
+  kb_issue: boolean;
+  guardrail_bypass: boolean;
+  source_code: boolean;
   metrics: Metrics;
   last_message_at?: string | null;
   analyzed_at?: string;
+}
+
+export interface ImmediateAnalytics {
+  total_matching: number;
+  immediate_attention: number;
+  kb_issues: number;
+  empty_final_response: number;
+  guardrail_bypass: number;
+  high_frustration: number;
+  ticket_failure?: number;
+  rate_limit: number;
+  affected_tenants: number;
+  by_reason: Record<string, number>;
+  top_reasons?: { reason: string; count: number }[];
+  by_region: Record<string, number>;
+  kb_by_day: { date: string; count: number }[];
+  kb_by_day_region: { date: string; us: number; eu: number; uk: number; total: number }[];
+  kb_by_tenant: { tenant_id: string | null; tenant_name: string; region?: string | null; count: number }[];
+  serious_by_day: {
+    date: string;
+    empty_final_response: number;
+    guardrail_bypass: number;
+    high_frustration?: number;
+    ticket_failure?: number;
+    other_serious: number;
+    by_reason?: Record<string, number>;
+    total: number;
+  }[];
+  top_tenants: {
+    tenant_id: string | null;
+    tenant_name: string;
+    region?: string | null;
+    immediate_attention: number;
+    kb_issues: number;
+    empty_final_response: number;
+    guardrail_bypass: number;
+    total: number;
+  }[];
 }
 
 export interface ListResponse {
@@ -38,14 +94,22 @@ export interface ListResponse {
   unanalysed: number;
   limit: number;
   offset: number;
+  analytics?: ImmediateAnalytics;
 }
 
 export interface AnalysisQuery {
   category?: string;
   region?: string;
   query?: string;
+  tenant?: string;
   confidence?: string;
   review_state?: string;
+  attention_reason?: string;
+  has_feedback?: string;
+  date_range?: string;
+  date_from?: string;
+  date_to?: string;
+  include_analytics?: boolean;
   sort?: string;
   limit?: number;
   offset?: number;
@@ -88,6 +152,8 @@ export interface Message {
   sequence_num: number;
   model: string | null;
   created_at: string;
+  status?: string | null;
+  error_message?: string | null;
   input_tokens?: number | null;   // per-message telemetry (FR-4); null = not captured (AC-7)
   output_tokens?: number | null;
   prompt_tokens?: number | null;
@@ -114,6 +180,8 @@ export interface Enrichment {
   intent: string | null;
   secondary_intent: string | null;
   agent_used: string | null;
+  platform: string | null;
+  interaction_mode: string | null;
   response_type: string | null;
   source_confidence: string | null;
   retrieval_hit: boolean | null;
@@ -127,6 +195,8 @@ export interface Enrichment {
   had_error: boolean | null;
   turns: number | null;
   langsmith_found: boolean;
+  trace_id?: string;
+  trace_url?: string;
 }
 
 export interface EAInfo {
@@ -138,6 +208,7 @@ export interface EAInfo {
   privacy_sensitive: boolean;
 }
 export interface ConversationSource {
+  region?: string | null;
   tenant_id?: string | null;
   tenant_name?: string | null;
   ea?: EAInfo | null; // Early Access customer badge
@@ -154,6 +225,7 @@ export interface ConversationDetail {
   conversation_id: string;
   source?: ConversationSource | null;
   analysis: {
+    region?: string | null;
     category: string;
     model_category: string;
     recommended_next_step: string;
@@ -176,14 +248,26 @@ export interface ConversationDetail {
 }
 
 export interface FeedbackItem extends ConversationSource {
+  feedback_id: string;
+  feedback_message_id?: string | null;
+  turn_number?: number | null;
+  user_query?: string | null;
+  feedback_at?: string | null;
   conversation_id: string;
+  platform?: string | null;
+  interaction_mode?: string | null;
+  agent_used?: string | null;
   category: string;
   model_category?: string;
   confidence: string;
   rating: boolean | null;
   comment: string | null;
   feedbacks?: Feedback[];
-  feedback_message_id?: string | null;
+  immediate_attention?: boolean;
+  attention_reasons?: string[];
+  kb_issue?: boolean;
+  guardrail_bypass?: boolean;
+  source_code?: boolean;
   recommended_next_step: string;
   rationale?: string;
   why_it_happened?: string;
@@ -265,9 +349,11 @@ export async function fetchFeedbackConversation(id: string): Promise<Conversatio
   return fetchConversation(id);
 }
 
-export async function fetchFeedbackItem(id: string): Promise<FeedbackItem> {
-  const response = await fetchFeedback({ query: id, limit: 1 });
-  const item = response.items.find((feedback) => feedback.conversation_id === id);
+export async function fetchFeedbackItem(id: string, messageId?: string): Promise<FeedbackItem> {
+  const response = await fetchFeedback({ query: id, limit: 100 });
+  const item = response.items.find(
+    (feedback) => feedback.conversation_id === id && (!messageId || feedback.feedback_message_id === messageId),
+  );
   if (!item) throw new Error(`No explicit feedback for conversation ${id}`);
   return item;
 }
@@ -314,12 +400,46 @@ export interface PendingItem {
   tenant_name: string | null;
   title: string | null;
   last_message_at: string | null;
+  negative_count?: number | null;
+  positive_count?: number | null;
+}
+export interface PendingNegativeFeedbackItem {
+  feedback_id: string;
+  conversation_id: string;
+  feedback_message_id: string | null;
+  turn_number?: number | null;
+  user_query?: string | null;
+  comment: string | null;
+  feedback_at: string | null;
+  region: string | null;
+  tenant_name: string | null;
+  title: string | null;
+  platform: string;
+  interaction_mode: string;
+  agent_used: string | null;
+  frustration_score: number | null;
 }
 export interface PendingResponse {
   count: number;
   ids: string[];
   by_region: Record<string, number>;
   items: PendingItem[];
+  in_progress?: number; // already queued/analysing — will finish without a new sweep
+  failed?: number; // dead-lettered; retried on the next Analyze
+  feedback_messages?: number;
+  positive_feedback_messages?: number;
+  negative_feedback_messages?: number;
+  positive_feedback_conversations?: number;
+  negative_feedback_conversations?: number;
+  negative_by_region?: Record<string, number>;
+  negative_by_mode?: Record<string, number>;
+  negative_by_platform?: Record<string, number>;
+  deep_research_negative?: number;
+  average_frustration?: number | null;
+  frustration_scored_messages?: number;
+  negative_items?: PendingNegativeFeedbackItem[];
+  details_complete?: boolean;
+  analysis_window_days?: number | null;
 }
 
 export type ExportFormat = "csv" | "pdf" | "json";
@@ -365,7 +485,28 @@ export async function fetchPending(region?: string, scope?: string): Promise<Pen
   const res = await fetch(withEnv(url).toString());
   if (!res.ok) throw new Error(`Fetch pending failed: ${res.status}`);
   const d = (await res.json()) as Partial<PendingResponse>;
-  return { count: d.count ?? 0, ids: d.ids ?? [], by_region: d.by_region ?? {}, items: d.items ?? [] };
+  return {
+    count: d.count ?? 0,
+    ids: d.ids ?? [],
+    by_region: d.by_region ?? {},
+    items: d.items ?? [],
+    in_progress: d.in_progress ?? 0,
+    failed: d.failed ?? 0,
+    feedback_messages: d.feedback_messages ?? 0,
+    positive_feedback_messages: d.positive_feedback_messages ?? 0,
+    negative_feedback_messages: d.negative_feedback_messages ?? 0,
+    positive_feedback_conversations: d.positive_feedback_conversations ?? 0,
+    negative_feedback_conversations: d.negative_feedback_conversations ?? 0,
+    negative_by_region: d.negative_by_region ?? {},
+    negative_by_mode: d.negative_by_mode ?? {},
+    negative_by_platform: d.negative_by_platform ?? {},
+    deep_research_negative: d.deep_research_negative ?? 0,
+    average_frustration: d.average_frustration ?? null,
+    frustration_scored_messages: d.frustration_scored_messages ?? 0,
+    negative_items: d.negative_items ?? [],
+    details_complete: d.details_complete ?? true,
+    analysis_window_days: d.analysis_window_days ?? null,
+  };
 }
 
 /** Step 2: start the background analysis of not-yet-analysed conversations (deduped) for the

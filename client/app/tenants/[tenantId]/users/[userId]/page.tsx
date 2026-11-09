@@ -188,6 +188,7 @@ export default function UserConversationsPage() {
           <Typography variant="h1" component="h1" sx={{ overflowWrap: "anywhere" }}>{userName}</Typography>
           <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 0.75 }}>
             {user?.role && <Chip size="small" label={user.role} variant="outlined" />}
+            {(user?.regions ?? []).map((value) => <Chip key={value} size="small" label={value.toUpperCase()} color="primary" variant="outlined" />)}
             <Typography variant="caption" color="text.secondary">User ID {userId}</Typography>
             <Typography variant="caption" color="text.secondary">· Tenant ID {tenantId}</Typography>
           </Stack>
@@ -258,6 +259,7 @@ export default function UserConversationsPage() {
                     <Typography variant="body2" sx={{ fontWeight: 750 }}>{conversation.title || `Conversation ${conversation.conversation_id.slice(0, 8)}`}</Typography>
                   )}
                   <Typography variant="caption" color="text.secondary" sx={{ display: "block", overflowWrap: "anywhere" }}>{conversation.conversation_id}</Typography>
+                  {conversation.region && <Chip size="small" label={conversation.region.toUpperCase()} color="primary" variant="outlined" sx={{ mt: 0.5, mr: 0.75 }} />}
                   <Typography variant="caption" color="text.secondary">{formatDate(conversation.last_message_at)}</Typography>
                 </TableCell>
                 <TableCell><StatusCell c={conversation} /></TableCell>

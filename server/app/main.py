@@ -24,10 +24,22 @@ from .store_factory import make_store
 
 app = FastAPI(title="JAI Conversation Analysis API", version="0.2.0")
 
+# Internal tool: allow the reviewer UI from loopback AND private-LAN addresses (RFC1918) on any
+# port, so opening the UI via the host's LAN IP (e.g. http://10.19.8.252:3000) is not blocked by
+# CORS. Public origins are still rejected; add explicit ones with CORS_ALLOW_ORIGINS.
+_ALLOWED_ORIGIN_RE = (
+    r"https?://("
+    r"localhost|127\.0\.0\.1|\[::1\]"                 # loopback
+    r"|10\.\d{1,3}\.\d{1,3}\.\d{1,3}"                 # 10.0.0.0/8
+    r"|192\.168\.\d{1,3}\.\d{1,3}"                    # 192.168.0.0/16
+    r"|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"     # 172.16.0.0/12
+    r")(:\d+)?"
+)
+
 app.add_middleware(
     CORSMiddleware,
-    # Dev: allow the reviewer UI from any localhost/127.0.0.1 port (incl. browser previews).
-    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
+    allow_origins=[o.strip() for o in settings.cors_allow_origins.split(",") if o.strip()],
+    allow_origin_regex=_ALLOWED_ORIGIN_RE,
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
@@ -66,8 +78,12 @@ def _eligible_by_region(
     if not regions:
         return out
 
+    lookback_days = settings.analysis_lookback_days(env)
+
     def _one(r):
-        return r.label, _eligible_in_region(r, None, None, feedback_only=feedback_only)
+        return r.label, _eligible_in_region(
+            r, None, None, feedback_only=feedback_only, lookback_days=lookback_days
+        )
 
     # Regions are independent remote chat DBs → query them concurrently (the eligibility scan can
     # be slow), skipping any that error so one bad region can't stop the rest.
@@ -205,9 +221,22 @@ def _has_thumbs(conv: CommonConversation | None) -> bool:
     return conv.feedback.rating is not None or any(f.rating is not None for f in conv.feedbacks)
 
 
-def _list_item(record: AnalysisRecord, conv: CommonConversation | None) -> dict:
-    return {
+def _list_item(
+    record: AnalysisRecord,
+    conv: CommonConversation | None,
+    tenant_map: dict[str, str] | None = None,
+    include_tenant: bool = False,
+) -> dict:
+    from .ea_customers import ea_info
+
+    enrichment = record.enrichment
+    item = {
         "conversation_id": record.conversation_id,
+        "region": record.region or None,
+        "title": getattr(conv, "title", None) if conv else None,
+        "platform": enrichment.platform if enrichment else None,
+        "interaction_mode": enrichment.interaction_mode if enrichment else None,
+        "agent_used": enrichment.agent_used if enrichment else None,
         "category": record.category,
         "model_category": record.model_category,
         "recommended_next_step": record.recommended_next_step,
@@ -215,10 +244,22 @@ def _list_item(record: AnalysisRecord, conv: CommonConversation | None) -> dict:
         "status": record.status,
         "overridden": record.override is not None,
         "has_feedback": _has_thumbs(conv),
+        "immediate_attention": record.signals.immediate_attention,
+        "attention_reasons": record.signals.attention_reasons,
+        "kb_issue": record.signals.kb_issue,
+        "guardrail_bypass": record.signals.guardrail_bypass,
+        "source_code": record.signals.source_code,
         "metrics": _metrics(record),
         "last_message_at": _last_message_at(conv),
         "analyzed_at": record.analyzed_at,
     }
+    if include_tenant:
+        tenant_id = str(record.tenant_id).strip() if record.tenant_id else None
+        tenant_name = (tenant_map or {}).get(tenant_id or "") or (f"Tenant {tenant_id}" if tenant_id else None)
+        item["tenant_id"] = tenant_id
+        item["tenant_name"] = tenant_name
+        item["ea"] = ea_info(tenant_name, tenant_id) if tenant_id or tenant_name else None
+    return item
 
 
 @app.get("/health")
@@ -268,14 +309,192 @@ def list_regions(env: str | None = Query(default=None)):
     }
 
 
+def _item_activity_day(item: dict) -> date | None:
+    value = item.get("last_message_at") or item.get("analyzed_at")
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).date()
+    except (ValueError, TypeError):
+        return None
+
+
+def _apply_date_window(items: list[dict], date_range: str | None, date_from: date | None, date_to: date | None) -> list[dict]:
+    range_start = date_from
+    range_end = date_to
+    if date_range:
+        range_end = datetime.now(timezone.utc).date()
+        days = {"last_7_days": 6, "last_15_days": 14, "last_30_days": 29}.get(date_range, 29)
+        range_start = range_end - timedelta(days=days)
+    if not (range_start or range_end):
+        return items
+    return [
+        item for item in items
+        if (day := _item_activity_day(item)) is not None
+        and (range_start is None or day >= range_start)
+        and (range_end is None or day <= range_end)
+    ]
+
+
+def _immediate_analytics(items: list[dict]) -> dict:
+    from collections import defaultdict
+
+    reason_counts: dict[str, int] = {}
+    last_15d_reason_counts: dict[str, int] = {}
+    cutoff_15d = datetime.now(timezone.utc).date() - timedelta(days=14)
+    region_counts: dict[str, int] = {}
+    tenant_counts: dict[str, dict] = {}
+    kb_by_day_map: dict[str, int] = defaultdict(int)
+    kb_by_day_region_map: dict[str, dict[str, int]] = defaultdict(lambda: {"us": 0, "eu": 0, "uk": 0})
+    kb_by_tenant_map: dict[str, dict] = {}
+    serious_by_day_map: dict[str, dict[str, int]] = defaultdict(
+        lambda: {
+            "empty_final_response": 0,
+            "guardrail_bypass": 0,
+            "high_frustration": 0,
+            "ticket_failure": 0,
+            "other_serious": 0,
+        }
+    )
+    reasons_by_day_map: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+
+    for item in items:
+        reg = (item.get("region") or "unknown").lower()
+        region_counts[reg] = region_counts.get(reg, 0) + 1
+        tid = str(item.get("tenant_id") or "unknown")
+        tname = str(item.get("tenant_name") or (f"Tenant {tid}" if tid != "unknown" else "Unknown tenant"))
+        day_obj = _item_activity_day(item)
+        day_str = day_obj.isoformat() if day_obj else "Unknown"
+
+        reasons = list(item.get("attention_reasons") or [])
+        for r in reasons:
+            reason_counts[r] = reason_counts.get(r, 0) + 1
+            if day_obj and day_obj >= cutoff_15d:
+                last_15d_reason_counts[r] = last_15d_reason_counts.get(r, 0) + 1
+
+        if item.get("immediate_attention") or item.get("kb_issue"):
+            tentry = tenant_counts.setdefault(
+                tid,
+                {
+                    "tenant_id": None if tid == "unknown" else tid,
+                    "tenant_name": tname,
+                    "region": item.get("region"),
+                    "immediate_attention": 0,
+                    "kb_issues": 0,
+                    "empty_final_response": 0,
+                    "guardrail_bypass": 0,
+                    "total": 0,
+                },
+            )
+            tentry["total"] += 1
+            if item.get("immediate_attention"):
+                tentry["immediate_attention"] += 1
+            if item.get("kb_issue"):
+                tentry["kb_issues"] += 1
+            if "empty_final_response" in reasons:
+                tentry["empty_final_response"] += 1
+            if item.get("guardrail_bypass") or "guardrail_bypass" in reasons:
+                tentry["guardrail_bypass"] += 1
+
+        if item.get("kb_issue"):
+            if day_obj:
+                kb_by_day_map[day_str] += 1
+                if reg in ("us", "eu", "uk"):
+                    kb_by_day_region_map[day_str][reg] += 1
+            kb_tenant = kb_by_tenant_map.setdefault(
+                tid,
+                {
+                    "tenant_id": None if tid == "unknown" else tid,
+                    "tenant_name": tname,
+                    "region": item.get("region"),
+                    "count": 0,
+                },
+            )
+            kb_tenant["count"] += 1
+
+        if day_obj and item.get("immediate_attention"):
+            for r in reasons:
+                reasons_by_day_map[day_str][r] += 1
+            has_empty = "empty_final_response" in reasons
+            has_bypass = bool(item.get("guardrail_bypass") or "guardrail_bypass" in reasons)
+            has_frust = "high_frustration" in reasons
+            has_ticket = "ticket_failure" in reasons
+            other_serious = any(
+                r not in {"empty_final_response", "guardrail_bypass", "high_frustration", "ticket_failure"}
+                for r in reasons
+            )
+            if has_empty:
+                serious_by_day_map[day_str]["empty_final_response"] += 1
+            if has_bypass:
+                serious_by_day_map[day_str]["guardrail_bypass"] += 1
+            if has_frust:
+                serious_by_day_map[day_str]["high_frustration"] += 1
+            if has_ticket:
+                serious_by_day_map[day_str]["ticket_failure"] += 1
+            if other_serious:
+                serious_by_day_map[day_str]["other_serious"] += 1
+
+    sorted_reasons = sorted(reason_counts.items(), key=lambda pair: (-pair[1], pair[0]))
+    sorted_15d_reasons = sorted(last_15d_reason_counts.items(), key=lambda pair: (-pair[1], pair[0]))
+    top_reasons = [{"reason": r, "count": c} for r, c in sorted_15d_reasons[:3]]
+    all_days = sorted(set(kb_by_day_map.keys()) | set(serious_by_day_map.keys()))
+    return {
+        "total_matching": len(items),
+        "immediate_attention": sum(1 for item in items if item.get("immediate_attention")),
+        "kb_issues": sum(1 for item in items if item.get("kb_issue")),
+        "empty_final_response": sum(1 for item in items if "empty_final_response" in (item.get("attention_reasons") or [])),
+        "guardrail_bypass": sum(1 for item in items if item.get("guardrail_bypass") or "guardrail_bypass" in (item.get("attention_reasons") or [])),
+        "high_frustration": sum(1 for item in items if "high_frustration" in (item.get("attention_reasons") or [])),
+        "ticket_failure": sum(1 for item in items if "ticket_failure" in (item.get("attention_reasons") or [])),
+        "rate_limit": sum(1 for item in items if "rate_limit" in (item.get("attention_reasons") or [])),
+        "affected_tenants": len({item.get("tenant_id") for item in items if item.get("tenant_id")}),
+        "by_reason": dict(sorted_reasons),
+        "top_reasons": top_reasons,
+        "by_region": region_counts,
+        "kb_by_day": [{"date": day, "count": kb_by_day_map.get(day, 0)} for day in all_days],
+        "kb_by_day_region": [
+            {
+                "date": day,
+                "us": kb_by_day_region_map[day]["us"],
+                "eu": kb_by_day_region_map[day]["eu"],
+                "uk": kb_by_day_region_map[day]["uk"],
+                "total": sum(kb_by_day_region_map[day].values()),
+            }
+            for day in all_days
+        ],
+        "kb_by_tenant": sorted(kb_by_tenant_map.values(), key=lambda row: row["count"], reverse=True)[:12],
+        "serious_by_day": [
+            {
+                "date": day,
+                "empty_final_response": serious_by_day_map[day]["empty_final_response"],
+                "guardrail_bypass": serious_by_day_map[day]["guardrail_bypass"],
+                "high_frustration": serious_by_day_map[day]["high_frustration"],
+                "ticket_failure": serious_by_day_map[day]["ticket_failure"],
+                "other_serious": serious_by_day_map[day]["other_serious"],
+                "by_reason": dict(reasons_by_day_map[day]),
+                "total": sum(serious_by_day_map[day].values()),
+            }
+            for day in all_days
+        ],
+        "top_tenants": sorted(tenant_counts.values(), key=lambda row: (row["total"], row["immediate_attention"]), reverse=True)[:12],
+    }
+
+
 @api.get("/conversations")
 def list_conversations(
     category: str | None = Query(default=None),
     region: str | None = Query(default=None),
     env: str | None = Query(default=None),
     query: str | None = Query(default=None, max_length=200),
+    tenant: str | None = Query(default=None, max_length=200),
     confidence: str | None = Query(default=None),
     review_state: str | None = Query(default=None),
+    attention_reason: str | None = Query(default=None, max_length=50),
+    has_feedback: str | None = Query(default=None, pattern="^(yes|no)$"),
+    date_range: str | None = Query(default=None, pattern="^(last_7_days|last_15_days|last_30_days)$"),
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    include_analytics: bool = Query(default=False),
     sort: str = Query(default="newest"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -287,25 +506,66 @@ def list_conversations(
         return bad
     if confidence is not None and confidence not in {"high", "medium", "low"}:
         return problem_response(400, "Invalid confidence", f"Unknown confidence: {confidence}")
-    if review_state is not None and review_state not in {"attention", "feedback", "overridden", "missing_telemetry"}:
+    if review_state is not None and review_state not in {"attention", "immediate_attention", "kb_issue", "immediate_or_kb", "feedback", "overridden", "missing_telemetry"}:
         return problem_response(400, "Invalid review state", f"Unknown review state: {review_state}")
+    if date_from and date_to and date_from > date_to:
+        return problem_response(400, "Invalid date range", "date_from must be on or before date_to")
     if sort not in {"newest", "oldest", "attention", "confidence", "slowest", "tokens"}:
         return problem_response(400, "Invalid sort", f"Unknown sort: {sort}")
 
+    include_tenant = bool(include_analytics or tenant)
+    tenant_map: dict[str, str] = {}
+    if include_tenant:
+        try:
+            from . import dashboard
+
+            tenant_map = dashboard.tenant_names(region=region, env=env)
+        except Exception:  # noqa: BLE001
+            tenant_map = {}
+
     records = store.list(category=category, region=region, env=env)  # type: ignore[arg-type]
     conversations = store.get_conversations([record.conversation_id for record in records], env)
-    items = [_list_item(record, conversations.get(record.conversation_id)) for record in records]
+    all_items = [
+        _list_item(record, conversations.get(record.conversation_id), tenant_map, include_tenant=include_tenant)
+        for record in records
+    ]
+    items = list(all_items)
     text_query = (query or "").strip().lower()
+    tenant_query = (tenant or "").strip().lower()
     if text_query:
         items = [
             item for item in items
-            if text_query in item["conversation_id"].lower()
-            or text_query in item["recommended_next_step"].lower()
+            if any(
+                text_query in str(item.get(field) or "").lower()
+                for field in ("conversation_id", "title", "tenant_id", "tenant_name", "recommended_next_step")
+            )
+        ]
+    if tenant_query:
+        items = [
+            item for item in items
+            if tenant_query in str(item.get("tenant_id") or "").lower()
+            or tenant_query in str(item.get("tenant_name") or "").lower()
         ]
     if confidence:
         items = [item for item in items if item["confidence"] == confidence]
+    if has_feedback == "yes":
+        items = [item for item in items if item["has_feedback"]]
+    elif has_feedback == "no":
+        items = [item for item in items if not item["has_feedback"]]
+    items = _apply_date_window(items, date_range, date_from, date_to)
+
+    analytics_pool = [
+        item for item in items
+        if item["immediate_attention"] or item["kb_issue"]
+    ]
     if review_state == "attention":
-        items = [item for item in items if item["category"] in {"failed_to_resolve", "negative_feedback", "out_of_scope"}]
+        items = [item for item in items if item["category"] in {"failed_to_resolve", "negative_feedback", "out_of_scope"} or item["immediate_attention"]]
+    elif review_state == "immediate_attention":
+        items = [item for item in items if item["immediate_attention"]]
+    elif review_state == "kb_issue":
+        items = [item for item in items if item["kb_issue"]]
+    elif review_state == "immediate_or_kb":
+        items = [item for item in items if item["immediate_attention"] or item["kb_issue"]]
     elif review_state == "feedback":
         items = [item for item in items if item["has_feedback"]]
     elif review_state == "overridden":
@@ -317,6 +577,11 @@ def list_conversations(
             or item["metrics"]["input_tokens"] is None
             or item["metrics"]["output_tokens"] is None
         ]
+    if attention_reason:
+        if attention_reason == "kb_issue":
+            items = [item for item in items if item["kb_issue"]]
+        else:
+            items = [item for item in items if attention_reason in item["attention_reasons"]]
 
     priority = {"negative_feedback": 0, "failed_to_resolve": 1, "out_of_scope": 2, "positive_feedback": 3, "resolved": 4}
     confidence_order = {"low": 0, "medium": 1, "high": 2}
@@ -331,11 +596,32 @@ def list_conversations(
     elif sort == "tokens":
         items.sort(key=lambda item: (item["metrics"]["input_tokens"] or 0) + (item["metrics"]["output_tokens"] or 0), reverse=True)
     else:
-        items.sort(key=lambda item: priority.get(item["category"], 9))
+        items.sort(key=lambda item: (not item["immediate_attention"], priority.get(item["category"], 9)))
 
     total = len(items)
-    return {
-        "items": items[offset : offset + limit],
+    page_items = items[offset : offset + limit]
+    missing_meta_ids = (
+        [item["conversation_id"] for item in page_items if not item.get("tenant_id") or not item.get("title")]
+        if include_tenant
+        else []
+    )
+    if missing_meta_ids:
+        try:
+            from . import dashboard
+
+            meta = dashboard.conversation_meta(missing_meta_ids, region=region, env=env)
+            for item in page_items:
+                m = meta.get(item["conversation_id"])
+                if m:
+                    item["tenant_id"] = item.get("tenant_id") or m.get("tenant_id")
+                    item["tenant_name"] = item.get("tenant_name") or m.get("tenant_name")
+                    item["ea"] = item.get("ea") or m.get("ea")
+                    item["title"] = item.get("title") or m.get("title")
+        except Exception:  # noqa: BLE001
+            pass
+
+    response = {
+        "items": page_items,
         "counts": store.count_by_category(region=region, env=env),
         "total": total,
         # Region-scoped when a region is selected (matches the region-filtered items/counts);
@@ -346,6 +632,10 @@ def list_conversations(
         "limit": limit,
         "offset": offset,
     }
+    if include_analytics:
+        response["analytics"] = _immediate_analytics(analytics_pool if review_state in {"immediate_attention", "kb_issue", "immediate_or_kb"} else items)
+    return response
+
 
 
 def _conversation_detail(conversation_id: str, env: str = "uit") -> dict | None:
@@ -360,10 +650,27 @@ def _conversation_detail(conversation_id: str, env: str = "uit") -> dict | None:
         source = dashboard.conversation_meta([conversation_id], env=env).get(conversation_id)
     except Exception:  # noqa: BLE001 - chat DB optional; detail still works de-identified
         source = None
+    enrichment = record.enrichment
+    if record.region and (
+        enrichment is None or (enrichment.langsmith_found and not enrichment.trace_id)
+    ):
+        from .enrichment import fetch_enrichment
+
+        fetched = fetch_enrichment(
+            conversation_id,
+            record.region,
+            env,
+            with_prompt=_has_thumbs(conv),
+        )
+        if fetched is not None and (enrichment is None or fetched.trace_id):
+            record.enrichment = fetched
+            store.upsert(record, conv)
+            enrichment = fetched
     return {
         "conversation_id": conversation_id,
         "source": source,  # tenant/user/title/timestamps (authorised admin view)
         "analysis": {
+            "region": record.region or None,
             "category": record.category,
             "model_category": record.model_category,
             "recommended_next_step": record.recommended_next_step,
@@ -379,7 +686,7 @@ def _conversation_detail(conversation_id: str, env: str = "uit") -> dict | None:
             "analyzed_at": record.analyzed_at,
         },
         "deep": asdict(record.deep) if record.deep else None,
-        "enrichment": asdict(record.enrichment) if record.enrichment else None,
+        "enrichment": asdict(enrichment) if enrichment else None,
         "metrics": _metrics(record),
         "messages": [
             {
@@ -389,6 +696,8 @@ def _conversation_detail(conversation_id: str, env: str = "uit") -> dict | None:
                 "sequence_num": m.sequence_num,
                 "model": m.model,
                 "created_at": m.created_at,
+                "status": m.status,
+                "error_message": m.error_message,
                 # Per-message generation telemetry (FR-4): null = not captured (AC-7), never 0.
                 "input_tokens": m.input_tokens,
                 "output_tokens": m.output_tokens,
@@ -431,10 +740,10 @@ def feedback_conversations(
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
     sort: str = Query(default="newest", pattern="^(newest|oldest|negative_first)$"),
-    limit: int = Query(default=10, ge=1, le=100),
+    limit: int = Query(default=100, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ):
-    """Feedback / negative-signal conversations, rich row per conversation for a reviewer table.
+    """Feedback / negative-signal records, one rich row per rated message for a reviewer table.
 
     scope=thumbs (default): only EXPLICIT thumbs feedback (up/down).
     scope=outcomes: conversations the model judged negative (failed_to_resolve /
@@ -453,7 +762,11 @@ def feedback_conversations(
     conversations = store.get_conversations([record.conversation_id for record in records], env)
     for record in records:
         conv = conversations.get(record.conversation_id)
-        has_thumbs = _has_thumbs(conv)
+        feedbacks = list(conv.feedbacks) if conv else []
+        if conv and not feedbacks and (conv.feedback.rating is not None or conv.feedback.comment):
+            feedbacks = [conv.feedback]
+        rated_feedbacks = [feedback for feedback in feedbacks if feedback.rating is not None]
+        has_thumbs = bool(rated_feedbacks)
         neg_outcome = record.category in _NEGATIVE_CATEGORIES
         if scope == "thumbs" and not has_thumbs:
             continue
@@ -463,33 +776,63 @@ def feedback_conversations(
             continue
         m = record.metrics
         deep = asdict(record.deep) if record.deep else None
-        items.append(
-            {
-                "conversation_id": record.conversation_id,
-                "category": record.category,
-                "model_category": record.model_category,
-                "confidence": record.confidence,
-                "rating": conv.feedback.rating if conv else None,
-                "comment": conv.feedback.comment if conv else None,
-                "feedbacks": [
-                    {"rating": f.rating, "comment": f.comment, "message_id": f.message_id}
-                    for f in (conv.feedbacks if conv else [])
-                ],
-                "has_thumbs": has_thumbs,
-                "recommended_next_step": record.recommended_next_step,
-                "rationale": record.rationale,
-                "why_it_happened": (deep or {}).get("why_it_happened", ""),
-                # Same derivation as the /groups endpoint (LLM label OR deterministic fallback) so
-                # the Insights drill-in (?root_cause=…) matches the group it came from.
-                "root_cause": _record_root_cause(record),
-                "input_tokens": m.input_tokens,
-                "output_tokens": m.output_tokens,
-                "last_message_at": _last_message_at(conv),
-                "analyzed_at": record.analyzed_at,
-                "analyzer_version": record.analyzer_version,
-                "deep": deep,
-            }
-        )
+        ordered_messages = list(conv.messages) if conv else []
+        messages = {message.id: message for message in ordered_messages}
+        msg_index = {message.id: idx for idx, message in enumerate(ordered_messages)}
+        events = rated_feedbacks or [None]
+        for index, feedback in enumerate(events):
+            message_id = feedback.message_id if feedback else None
+            message = messages.get(message_id) if message_id else None
+            turn_number = None
+            user_query = None
+            if message_id and message_id in msg_index:
+                pos_idx = msg_index[message_id]
+                turn_number = sum(1 for msg in ordered_messages[: pos_idx + 1] if msg.role == "assistant")
+                for prev in reversed(ordered_messages[:pos_idx]):
+                    if prev.role == "user" and (prev.content or "").strip():
+                        user_query = prev.content.strip()[:160]
+                        break
+            enrichment = record.enrichment
+            items.append(
+                {
+                    "feedback_id": f"{record.conversation_id}:{message_id or index}",
+                    "feedback_message_id": message_id,
+                    "turn_number": turn_number,
+                    "user_query": user_query,
+                    "feedback_at": message.created_at if message else None,
+                    "conversation_id": record.conversation_id,
+                    "category": record.category,
+                    "model_category": record.model_category,
+                    "confidence": record.confidence,
+                    "rating": feedback.rating if feedback else None,
+                    "comment": feedback.comment if feedback else None,
+                    "feedbacks": [
+                        {"rating": f.rating, "comment": f.comment, "message_id": f.message_id}
+                        for f in feedbacks
+                    ],
+                    "has_thumbs": has_thumbs,
+                    "immediate_attention": record.signals.immediate_attention,
+                    "attention_reasons": record.signals.attention_reasons,
+                    "kb_issue": record.signals.kb_issue,
+                    "guardrail_bypass": record.signals.guardrail_bypass,
+                    "source_code": record.signals.source_code,
+                    "platform": enrichment.platform if enrichment else None,
+                    "interaction_mode": enrichment.interaction_mode if enrichment else None,
+                    "agent_used": enrichment.agent_used if enrichment else None,
+                    "recommended_next_step": record.recommended_next_step,
+                    "rationale": record.rationale,
+                    "why_it_happened": (deep or {}).get("why_it_happened", ""),
+                    # Same derivation as the /groups endpoint (LLM label OR deterministic fallback) so
+                    # the Insights drill-in (?root_cause=…) matches the group it came from.
+                    "root_cause": _record_root_cause(record),
+                    "input_tokens": m.input_tokens,
+                    "output_tokens": m.output_tokens,
+                    "last_message_at": _last_message_at(conv),
+                    "analyzed_at": record.analyzed_at,
+                    "analyzer_version": record.analyzer_version,
+                    "deep": deep,
+                }
+            )
 
     scope_total = len(items)
     positive = sum(1 for item in items if item["rating"] is True)
@@ -526,8 +869,8 @@ def feedback_conversations(
             if any(
                 text_query in str(item.get(field) or "").lower()
                 for field in (
-                    "conversation_id", "comment", "title", "tenant_name", "user_name",
-                    "recommended_next_step", "why_it_happened",
+                    "conversation_id", "feedback_message_id", "comment", "title", "tenant_name", "user_name",
+                    "platform", "interaction_mode", "agent_used", "recommended_next_step", "why_it_happened",
                 )
             )
         ]
@@ -541,7 +884,7 @@ def feedback_conversations(
         range_start = range_end - timedelta(days=6 if date_range == "last_7_days" else 29)
     if range_start or range_end:
         def _activity_day(item):
-            value = item.get("last_message_at") or item.get("analyzed_at")
+            value = item.get("last_message_at") or item.get("feedback_at") or item.get("analyzed_at")
             if not value:
                 return None
             try:
@@ -566,9 +909,9 @@ def feedback_conversations(
         return 3
 
     if sort == "newest":
-        items.sort(key=lambda item: item["last_message_at"] or item["analyzed_at"] or "", reverse=True)
+        items.sort(key=lambda item: item["feedback_at"] or item["last_message_at"] or item["analyzed_at"] or "", reverse=True)
     elif sort == "oldest":
-        items.sort(key=lambda item: item["last_message_at"] or item["analyzed_at"] or "")
+        items.sort(key=lambda item: item["feedback_at"] or item["last_message_at"] or item["analyzed_at"] or "")
     else:
         items.sort(key=_rank)
     total = len(items)
@@ -590,6 +933,7 @@ def feedback_conversations(
 
 
 _ROOT_CAUSE_LABELS = {
+    "guardrail_bypass": "Guardrail bypass / internal detail exposure",
     "knowledge_gap": "Knowledge gap (right document not retrieved)",
     "wrong_document_retrieved": "Wrong documents retrieved",
     "wrong_routing": "Wrong routing / out of scope",
@@ -602,6 +946,10 @@ _ROOT_CAUSE_LABELS = {
 
 def _record_root_cause(record: AnalysisRecord) -> str:
     """Root-cause label for a record: the LLM label if present, else derived from safe signals."""
+    if record.signals.guardrail_bypass:
+        return "guardrail_bypass"
+    if record.signals.kb_issue:
+        return "knowledge_gap"
     if record.deep and record.deep.root_cause:
         return record.deep.root_cause
     e = record.enrichment
@@ -636,7 +984,7 @@ def root_cause_groups(
     groups: dict[str, dict] = {}
     for record in records:
         conv = conversations.get(record.conversation_id)
-        include = scope == "all" or _has_thumbs(conv) or record.category in _NEGATIVE_CATEGORIES
+        include = scope == "all" or _has_thumbs(conv) or record.category in _NEGATIVE_CATEGORIES or record.signals.immediate_attention or record.signals.kb_issue
         if not include:
             continue
         rc = _record_root_cause(record)
@@ -869,6 +1217,162 @@ def queue_stats(
     return analysis_queue.stats(limit=limit, offset=offset, env=_env(env))
 
 
+def _pending_feedback_summary(by_ids: dict[str, list[str]], env: str) -> dict:
+    empty = {
+        "feedback_messages": 0,
+        "positive_feedback_messages": 0,
+        "negative_feedback_messages": 0,
+        "positive_feedback_conversations": 0,
+        "negative_feedback_conversations": 0,
+        "negative_by_region": {},
+        "negative_by_mode": {},
+        "negative_by_platform": {},
+        "deep_research_negative": 0,
+        "average_frustration": None,
+        "frustration_scored_messages": 0,
+        "negative_items": [],
+        "details_complete": True,
+    }
+    ids = [cid for region_ids in by_ids.values() for cid in region_ids]
+    if not ids:
+        return empty
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    from . import dashboard
+    from .chatdb import load_from_chatdb
+    from .enrichment import fetch_enrichment
+
+    conversations = load_from_chatdb(ids=ids, env=env)
+    events = []
+    positive_messages = 0
+    positive_conversations = 0
+    negative_conversations = 0
+    per_conversation_counts: dict[str, dict[str, int]] = {}
+    by_conversation = {conversation.id: conversation for conversation in conversations}
+    for conversation in conversations:
+        ordered_messages = list(conversation.messages)
+        messages = {message.id: message for message in ordered_messages}
+        msg_index = {message.id: idx for idx, message in enumerate(ordered_messages)}
+        feedbacks = conversation.feedbacks or [conversation.feedback]
+        neg_n = sum(1 for feedback in feedbacks if feedback.rating is False)
+        pos_n = sum(1 for feedback in feedbacks if feedback.rating is True)
+        per_conversation_counts[conversation.id] = {"negative": neg_n, "positive": pos_n}
+        has_negative = neg_n > 0
+        has_positive = pos_n > 0
+        if has_negative:
+            negative_conversations += 1
+        elif has_positive:
+            positive_conversations += 1
+        for index, feedback in enumerate(feedbacks):
+            if feedback.rating is True:
+                positive_messages += 1
+                continue
+            if feedback.rating is not False:
+                continue
+            message = messages.get(feedback.message_id) if feedback.message_id else None
+            user_query = None
+            turn_number = None
+            if feedback.message_id and feedback.message_id in msg_index:
+                pos_idx = msg_index[feedback.message_id]
+                turn_number = sum(1 for m in ordered_messages[: pos_idx + 1] if m.role == "assistant")
+                for prev in reversed(ordered_messages[:pos_idx]):
+                    if prev.role == "user" and (prev.content or "").strip():
+                        user_query = prev.content.strip()[:160]
+                        break
+            events.append(
+                {
+                    "feedback_id": f"{conversation.id}:{feedback.message_id or index}",
+                    "conversation_id": conversation.id,
+                    "feedback_message_id": feedback.message_id,
+                    "turn_number": turn_number,
+                    "user_query": user_query,
+                    "comment": feedback.comment,
+                    "feedback_at": message.created_at if message else None,
+                    "region": conversation.region,
+                    "title": conversation.title,
+                }
+            )
+    events.sort(key=lambda item: item["feedback_at"] or "", reverse=True)
+    if not events:
+        return empty | {
+            "feedback_messages": positive_messages,
+            "positive_feedback_messages": positive_messages,
+            "positive_feedback_conversations": positive_conversations,
+            "per_conversation_counts": per_conversation_counts,
+        }
+
+    enrichment_ids = list(dict.fromkeys(event["conversation_id"] for event in events))[:20]
+    with ThreadPoolExecutor(max_workers=min(2, len(enrichment_ids))) as pool:
+        enrichment = {
+            cid: result
+            for cid, result in zip(
+                enrichment_ids,
+                pool.map(
+                    lambda cid: fetch_enrichment(
+                        cid,
+                        by_conversation[cid].region,
+                        env,
+                        with_prompt=True,
+                    ),
+                    enrichment_ids,
+                ),
+            )
+        }
+    display_ids = list(dict.fromkeys(event["conversation_id"] for event in events[:50]))
+    try:
+        meta = dashboard.conversation_meta(display_ids, env=env)
+    except Exception:
+        meta = {}
+
+    by_region: dict[str, int] = {}
+    by_mode: dict[str, int] = {}
+    by_platform: dict[str, int] = {}
+    frustration_scores = []
+    items = []
+    for event in events:
+        details = enrichment.get(event["conversation_id"])
+        mode = details.interaction_mode if details and details.interaction_mode else "Unknown"
+        platform = details.platform if details and details.platform else "Unknown"
+        frustration = details.frustration_score if details else None
+        region = event["region"] or "unknown"
+        by_region[region] = by_region.get(region, 0) + 1
+        by_mode[mode] = by_mode.get(mode, 0) + 1
+        by_platform[platform] = by_platform.get(platform, 0) + 1
+        if frustration is not None:
+            frustration_scores.append(frustration)
+        if len(items) < 50:
+            source = meta.get(event["conversation_id"], {})
+            items.append(
+                event
+                | {
+                    "tenant_name": source.get("tenant_name"),
+                    "title": source.get("title") or event["title"],
+                    "platform": platform,
+                    "interaction_mode": mode,
+                    "agent_used": details.agent_used if details else None,
+                    "frustration_score": frustration,
+                }
+            )
+
+    return {
+        "feedback_messages": positive_messages + len(events),
+        "positive_feedback_messages": positive_messages,
+        "negative_feedback_messages": len(events),
+        "positive_feedback_conversations": positive_conversations,
+        "negative_feedback_conversations": negative_conversations,
+        "negative_by_region": by_region,
+        "negative_by_mode": by_mode,
+        "negative_by_platform": by_platform,
+        "deep_research_negative": by_mode.get("Deep Research", 0),
+        "average_frustration": round(sum(frustration_scores) / len(frustration_scores), 2) if frustration_scores else None,
+        "frustration_scored_messages": len(frustration_scores),
+        "negative_items": items,
+        "per_conversation_counts": per_conversation_counts,
+        "details_complete": len(enrichment_ids) == len({event["conversation_id"] for event in events}),
+    }
+
+
 @api.get("/analyze/pending")
 def analyze_pending(
     region: str | None = Query(default=None),
@@ -880,21 +1384,36 @@ def analyze_pending(
     breakdown, and brief details for a sample. `scope=feedback` restricts to conversations with
     user feedback (PROD shows feedback + all as two separate lists)."""
     env = _env(env)
+    lookback_days = settings.analysis_lookback_days(env)
     if settings.source != "chatdb":
-        return {"count": 0, "ids": [], "by_region": {}, "items": [], "region": region, "environment": env, "scope": scope, "source": settings.source}
+        return {"count": 0, "ids": [], "by_region": {}, "items": [], "region": region, "environment": env, "scope": scope, "source": settings.source, "analysis_window_days": lookback_days}
     if (bad := _bad_region(region, env)) is not None:
         return bad
     from . import dashboard
 
     analysed = store.analysed_ids(env)
+    # Exclude conversations that are already being processed (queued / in-flight / retrying) so a
+    # second Analyze click mid-run does NOT re-list the same work as if it were new. Dead-lettered
+    # ids stay IN the count (the next sweep's retry_dead re-runs them) but are also surfaced as
+    # `failed`. This is what makes the "waiting" number honest between clicks.
+    in_progress = analysis_queue.in_progress_ids(env)
+    dead = analysis_queue.dead_ids(env)
+    skip = analysed | in_progress
     eligible = _eligible_by_region(region, env, feedback_only=(scope == "feedback"))
-    by_ids = {lbl: [i for i in ids if i not in analysed] for lbl, ids in eligible.items()}
+    by_ids = {lbl: [i for i in ids if i not in skip] for lbl, ids in eligible.items()}
     by_region = {lbl: len(ids) for lbl, ids in by_ids.items()}
     all_ids = [i for ids in by_ids.values() for i in ids]
     # Only enrich a bounded sample for the preview list — the 'all' scope in PROD can be huge and
     # conversation_meta joins the chat DB, so meta for every id would be slow. The count is exact.
-    sample = all_ids[:50]
-    meta = dashboard.conversation_meta(sample, region=region, env=env) if sample else {}
+    candidates = [cid for ids in by_ids.values() for cid in ids[:50]]
+    meta = dashboard.conversation_meta(candidates, region=region, env=env) if candidates else {}
+    sample = sorted(
+        candidates,
+        key=lambda cid: meta.get(cid, {}).get("last_message_at") or "",
+        reverse=True,
+    )[:50]
+    feedback_summary = _pending_feedback_summary(by_ids, env) if scope == "feedback" else {}
+    per_conv = feedback_summary.pop("per_conversation_counts", {}) if isinstance(feedback_summary, dict) else {}
     items = [
         {
             "conversation_id": cid,
@@ -902,6 +1421,8 @@ def analyze_pending(
             "tenant_name": meta.get(cid, {}).get("tenant_name"),
             "title": meta.get(cid, {}).get("title"),
             "last_message_at": meta.get(cid, {}).get("last_message_at"),
+            "negative_count": per_conv.get(cid, {}).get("negative"),
+            "positive_count": per_conv.get(cid, {}).get("positive"),
         }
         for cid in sample
     ]
@@ -910,9 +1431,13 @@ def analyze_pending(
         "ids": all_ids,
         "by_region": by_region,
         "items": items,
+        "in_progress": len(in_progress),  # already queued/analysing — will finish without a new sweep
+        "failed": len(dead),              # dead-lettered; the next Analyze retries them
+        **feedback_summary,
         "region": region,
         "environment": env,
         "scope": scope,
+        "analysis_window_days": lookback_days,
         "source": settings.source,
     }
 

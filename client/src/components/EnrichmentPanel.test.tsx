@@ -7,6 +7,8 @@ const base: Enrichment = {
   intent: "knowledge_search",
   secondary_intent: null,
   agent_used: "rag",
+  platform: "JI",
+  interaction_mode: "Ask",
   response_type: "answer",
   source_confidence: "MEDIUM",
   retrieval_hit: true,
@@ -23,11 +25,15 @@ const base: Enrichment = {
 };
 
 describe("EnrichmentPanel", () => {
-  it("renders nothing when there is no matched LangSmith trace", () => {
-    const { container } = render(<EnrichmentPanel enrichment={{ ...base, langsmith_found: false }} />);
-    expect(container).toBeEmptyDOMElement();
-    const { container: c2 } = render(<EnrichmentPanel enrichment={null} />);
-    expect(c2).toBeEmptyDOMElement();
+  it("explains when LangSmith details were not captured or no trace matched", () => {
+    const { rerender } = render(<EnrichmentPanel enrichment={null} />);
+    expect(screen.getByRole("heading", { name: /what the assistant did/i })).toBeInTheDocument();
+    expect(screen.getByText(/trace details were not captured when this analysis ran/i)).toBeInTheDocument();
+    expect(screen.getByText(/exact lookup failure was not retained/i)).toBeInTheDocument();
+
+    rerender(<EnrichmentPanel enrichment={{ ...base, langsmith_found: false }} />);
+    expect(screen.getByText(/no matching LangSmith trace was found/i)).toBeInTheDocument();
+    expect(screen.getByText(/configured project and environment returned no root runs/i)).toBeInTheDocument();
   });
 
   it("shows the agent signals, its reasoning, and the documents used", () => {

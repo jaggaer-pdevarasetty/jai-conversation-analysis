@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import re
 from collections import defaultdict
+from datetime import datetime, timezone
 
 from sqlalchemy import bindparam, create_engine, text
 from sqlalchemy.engine import make_url
@@ -24,6 +25,14 @@ from .config import RegionConfig, settings
 from .domain.models import Conversation, Feedback, Message
 
 _IDENT = re.compile(r"^[A-Za-z0-9_]+$")
+
+
+def utc_timestamp(value) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime) and value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.isoformat() if hasattr(value, "isoformat") else str(value).replace(" ", "T", 1)
 
 
 def safe_schema(schema: str | None = None) -> str:
@@ -141,7 +150,8 @@ def load_one_from_chatdb(conversation_id: str, engine=None, env: str = "uit") ->
 
 
 def _eligible_in_region(
-    region: RegionConfig, engine, limit: int | None, feedback_only: bool = False
+    region: RegionConfig, engine, limit: int | None, feedback_only: bool = False,
+    lookback_days: int | None = None,
 ) -> list[str]:
     """Eligible conversation ids in one region. When `feedback_only` (PROD posture), restrict to
     conversations that carry explicit user feedback — PROD has far too many conversations to
@@ -151,15 +161,20 @@ def _eligible_in_region(
     eng = engine or _engine_for(region.url, region.db_name)
     try:
         with eng.connect() as c:
+            params = {}
+            if lookback_days:
+                params["lookback_days"] = lookback_days
             if _platform_layout(c, sch):
                 if feedback_only:
                     # Feedback location isn't known for the platform schema → nothing bulk-eligible.
                     return []
                 # Only threads that actually have messages — a message-less thread has no
                 # transcript to analyse and would otherwise be labelled from an empty prompt.
+                recent = "and updated_at >= now() - (:lookback_days * interval '1 day') " if lookback_days else ""
                 sql = (
                     f"select id from \"{sch}\".threads "
                     f"where updated_at < now() - interval '5 minutes' "
+                    f"{recent}"
                     f"and exists (select 1 from \"{sch}\".thread_messages tm where tm.thread_id = threads.id) "
                     f"order by updated_at desc"
                 )
@@ -171,16 +186,19 @@ def _eligible_in_region(
                     if feedback_only else
                     f"and exists (select 1 from \"{sch}\".messages m where m.conversation_id = conversations.id) "
                 )
+                recent = "and last_message_at >= now() - (:lookback_days * interval '1 day') " if lookback_days else ""
                 sql = (
                     f"select id from \"{sch}\".conversations "
                     f"where is_deleted = false "
                     f"and (last_message_at is null or last_message_at < now() - interval '5 minutes') "
+                    f"{recent}"
                     f"{feedback}"
                     f"order by last_message_at desc nulls last"
                 )
             if limit:
                 sql += " limit :lim"
-            rows = c.execute(text(sql), {"lim": limit} if limit else {}).all()
+                params["lim"] = limit
+            rows = c.execute(text(sql), params).all()
         return [str(r[0]) for r in rows]
     finally:
         if engine is None:
@@ -268,7 +286,7 @@ def _load_platform_region(
                 sequence_num=int(row["sequence_num"]),
                 status="completed",
                 model=row["model"],
-                created_at=str(row["created_at"]) if row["created_at"] else "",
+                created_at=utc_timestamp(row["created_at"]) or "",
                 input_tokens=int(tokens) if (tokens is not None and not is_assistant) else None,
                 output_tokens=int(tokens) if (tokens is not None and is_assistant) else None,
                 ttft_ms=int(latency) if latency is not None else None,
@@ -280,7 +298,7 @@ def _load_platform_region(
             tenant_id=str(row["tenant_id"] or ""),
             user_id=str(row["user_id"] or ""),
             title=row["title"],
-            created_at=str(row["created_at"]) if row["created_at"] else "",
+            created_at=utc_timestamp(row["created_at"]) or "",
             messages=messages_by_thread.get(str(row["id"]), []),
             feedback=Feedback(),  # platform feedback not available in thread_messages
             region=region.label,
@@ -387,7 +405,7 @@ def _load_region(
                     status=m["status"],
                     error_message=m["error_message"],
                     model=m["model"],
-                    created_at=str(m["created_at"]) if m["created_at"] else "",
+                    created_at=utc_timestamp(m["created_at"]) or "",
                     # authoritative tokens from token_usage when present, else the message row
                     input_tokens=(u["total_input_tokens"] if u else None) or m["input_tokens"],
                     output_tokens=(u["total_output_tokens"] if u else None) or m["output_tokens"],
@@ -415,7 +433,7 @@ def _load_region(
                 tenant_id=str(r["tenant_id"]) if r["tenant_id"] is not None else "",
                 user_id=str(r["user_id"]) if r["user_id"] is not None else "",
                 title=r["title"],
-                created_at=str(r["created_at"]) if r["created_at"] else "",
+                created_at=utc_timestamp(r["created_at"]) or "",
                 messages=messages,
                 feedback=primary,
                 feedbacks=feedbacks,
